@@ -17,9 +17,9 @@ green and you flinched; hesitate and Lane 8 has you. Tagline: *Don't flinch.
 One shot, five rounds.* The project's codename stays **Lane 7** — the lane
 you are standing in, stencilled on the back wall — and the rival stays
 **Lane 8**. Folder, namespace and save key keep the codename so nothing on a
-player's phone breaks. Decided 11 Sep 2026; the repo slug (rooter-shooter)
-is just the repo slug — "rooter" is crude slang in Australia and New
-Zealand, so it never appears in the game.
+player's phone breaks. Decided 11 Sep 2026. The repo is
+github.com/zarah-ai-team/flinch; its first slug, rooter-shooter, was dropped
+because "rooter" is crude slang in Australia and New Zealand.
 
 ## One line
 

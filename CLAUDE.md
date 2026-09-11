@@ -116,6 +116,7 @@ null otherwise. `Sim.startLevel(level, { mode, day })` sets them.
 
 ## Deploy
 
+- **Repo**: github.com/zarah-ai-team/flinch. Live: https://zarah-ai-team.github.io/flinch/
 - **GitHub Pages**: `.github/workflows/deploy-pages.yml` runs the rules tests
   and publishes `index.html`, `src/`, `fonts/`, `icons/`, the manifest and
   `sw.js` on every push to `main`. One-time: repo Settings → Pages →

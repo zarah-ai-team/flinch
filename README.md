@@ -13,8 +13,10 @@ offline once loaded, installs to a phone home screen.
 
 ## Play
 
-- Open `lane7/index.html` in a browser, or run `npm run serve` and open
-  <http://localhost:8080>.
+- Live: <https://zarah-ai-team.github.io/flinch/> — add it to your phone's
+  home screen and it works offline.
+- Local: open `lane7/index.html` in a browser, or run `npm run serve` and
+  open <http://localhost:8080>.
 - `?q=max` pins full resolution, `?q=low` starts at 1× for old phones.
 
 ## Rules
