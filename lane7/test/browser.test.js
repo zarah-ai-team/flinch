@@ -161,6 +161,47 @@ const url = "file://" + path.join(__dirname, "..", "index.html") + "?q=max";
   if (drow.cls !== "daily done" || !/^Next in/.test(drow.action)) errors.push("daily row should be spent after playing: " + JSON.stringify(drow));
   await page.screenshot({ path: path.join(OUT, "17-title-after-daily.png") });
 
+  // Served over http the worker must register, precache one versioned cache
+  // and control the page after a reload. A tiny static server with the same
+  // ten-minute cache header GitHub Pages sends.
+  {
+    const http = require("http");
+    const root = path.join(__dirname, "..");
+    const mime = { ".html": "text/html", ".js": "text/javascript", ".webmanifest": "application/manifest+json", ".woff2": "font/woff2", ".png": "image/png" };
+    const server = http.createServer((req, res) => {
+      let p = decodeURIComponent(new URL(req.url, "http://x").pathname);
+      if (p.endsWith("/")) p += "index.html";
+      const file = path.join(root, p);
+      fs.readFile(file, (err, data) => {
+        if (err) { res.writeHead(404); res.end(); return; }
+        res.writeHead(200, { "Content-Type": mime[path.extname(file)] || "application/octet-stream", "Cache-Control": "max-age=600" });
+        res.end(data);
+      });
+    });
+    await new Promise((r) => server.listen(0, "127.0.0.1", r));
+    const port = server.address().port;
+    const page2 = await browser.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true });
+    page2.on("pageerror", (e) => errors.push("http pageerror: " + e.message));
+    page2.on("console", (m) => { if (m.type() === "error") errors.push("http console: " + m.text()); });
+    await page2.goto(`http://127.0.0.1:${port}/`);
+    await page2.waitForFunction(() => window.L7 && L7.game && L7.game.sim.state === "TITLE");
+    await page2.waitForFunction(async () => (await caches.keys()).length > 0, null, { timeout: 20000 });
+    await page2.reload();
+    await page2.waitForFunction(() => window.L7 && L7.game && navigator.serviceWorker.controller !== null, null, { timeout: 20000 });
+    await page2.waitForTimeout(500);
+    const sw = await page2.evaluate(async () => {
+      const keys = await caches.keys();
+      const cached = keys.length ? (await (await caches.open(keys[0])).keys()).length : 0;
+      return { keys, cached, controlled: !!navigator.serviceWorker.controller, version: L7.CONFIG.version, state: L7.game.sim.state, label: document.getElementById("version").textContent };
+    });
+    console.log("http + worker:", JSON.stringify(sw));
+    if (sw.keys.length !== 1 || sw.keys[0] !== "lane7-" + sw.version || !sw.controlled) errors.push("worker did not register with one versioned cache: " + JSON.stringify(sw));
+    if (sw.cached < 27) errors.push("precache incomplete: " + sw.cached + " entries");
+    if (sw.state !== "TITLE" || sw.label !== "v" + sw.version) errors.push("a controlled page that is already current must not reload or mislabel: " + JSON.stringify(sw));
+    await page2.close();
+    server.close();
+  }
+
   // Frame-time sample (software renderer — only relative numbers matter).
   const ft = await page.evaluate(() => new Promise((res) => {
     const t = []; let last = performance.now();

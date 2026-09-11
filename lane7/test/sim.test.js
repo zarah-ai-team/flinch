@@ -358,6 +358,40 @@ ok(slow[1] < mid[1] && mid[2] <= mid[0], "difficulty is monotone in the obvious 
   ok(s.dailyStreak === 0 && s.daily.won === false && s.dailyPlayed === 4 && s.dailyWon === 3, "a daily loss ends the streak and is recorded");
 }
 
+/* ---- 13. Service worker: parses, registers its handlers, versions agree, shell is complete ---- */
+{
+  const vm = require("vm"), fsx = require("fs");
+  const dir = path.join(__dirname, "..");
+  const src = fsx.readFileSync(path.join(dir, "sw.js"), "utf8");
+  const listeners = {};
+  const ctx = {
+    self: { addEventListener: (t, fn) => { listeners[t] = fn; }, skipWaiting: () => Promise.resolve(), clients: { claim: () => Promise.resolve(), matchAll: () => Promise.resolve([]) }, location: { origin: "https://example.test" }, registration: {} },
+    caches: { open: () => Promise.resolve({ addAll: () => Promise.resolve(), put: () => Promise.resolve() }), keys: () => Promise.resolve([]), match: () => Promise.resolve(undefined), delete: () => Promise.resolve(true) },
+    fetch: () => Promise.reject(new Error("no network in tests")),
+    Request: class { constructor(u, o) { this.url = u; this.init = o; } },
+    Response: { error: () => ({ error: true }) },
+    URL, Promise, setTimeout, console,
+    importScripts: () => { throw new Error("sw.js must not import scripts: WebKit compares only the main script"); }
+  };
+  let evalError = null;
+  try { vm.runInNewContext(src, ctx, { filename: "sw.js" }); } catch (e) { evalError = e; }
+  ok(evalError === null, `sw.js evaluates in a worker-like scope (${evalError && evalError.message})`);
+  ok(["install", "activate", "fetch", "message"].every(t => typeof listeners[t] === "function"), "sw.js registers install, activate, fetch and message handlers");
+  const build = (src.match(/const BUILD = "([^"]+)"/) || [])[1];
+  ok(build === CONFIG.version, `sw.js BUILD (${build}) equals CONFIG.version (${CONFIG.version})`);
+  const pkg = JSON.parse(fsx.readFileSync(path.join(dir, "..", "package.json"), "utf8"));
+  ok(pkg.version === CONFIG.version, `package.json version (${pkg.version}) equals CONFIG.version`);
+  // Every shell entry exists on disk, and every script index.html loads is in the shell.
+  const shell = new Set([...src.matchAll(/"(\.\/[^"]*)"/g)].map(m => m[1]));
+  const missing = [...shell].filter(p => p !== "./" && !fsx.existsSync(path.join(dir, p)));
+  ok(missing.length === 0, `every shell entry exists on disk (missing: ${missing.join(", ") || "none"})`);
+  const html = fsx.readFileSync(path.join(dir, "index.html"), "utf8");
+  const scripts = [...html.matchAll(/<script src="([^"]+)"/g)].map(m => "./" + m[1]);
+  const unlisted = scripts.filter(s => !shell.has(s));
+  ok(scripts.length >= 14 && unlisted.length === 0, `every script the page loads is precached (unlisted: ${unlisted.join(", ") || "none"})`);
+  ok(shell.has("./index.html") && shell.has("./") && shell.has("./manifest.webmanifest"), "the pages and the manifest are precached");
+}
+
 ok(decoyStats.got / decoyStats.want >= 0.9, `decoys placed ${(100 * decoyStats.got / decoyStats.want).toFixed(1)}% of the time (want ≥ 90%)`);
 console.log(`  decoy placement success: ${(100 * decoyStats.got / decoyStats.want).toFixed(1)}%  by level: ` +
   Object.keys(decoyStats.byLevel).filter(l => decoyStats.byLevel[l].want).map(l => `L${l} ${Math.round(100 * decoyStats.byLevel[l].got / decoyStats.byLevel[l].want)}%`).join(" "));

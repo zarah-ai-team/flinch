@@ -40,7 +40,9 @@ itch.io, zip the contents of `lane7/` without `test/`, with `index.html` at
 the zip root, and upload as an HTML project. The fonts are self-hosted, so
 there is no external dependency to worry about on either.
 
-Bump `VERSION` in `sw.js` together with `package.json` on every release:
+Bump the version in three places on every release — `BUILD` in `sw.js`,
+`CONFIG.version` in `config.js`, `package.json` — and `npm test` refuses
+to pass if they disagree. The worker's cache name comes from `BUILD`, and
 that is what makes a phone drop the previous build's cache.
 
 ## About the engine choice
@@ -364,7 +366,56 @@ install and then answers every same-origin GET network-first with the cache
 as fallback: online players always get the current build, a player in a
 tunnel gets the last one they loaded, and a navigation with nothing cached
 falls back to `index.html`. Registration is skipped on `file://`, where it
-would fail anyway. `apple-mobile-web-app-*` metas and the 180 px touch icon
+would fail anyway.
+
+**Freshness (v2.2.1).** GitHub Pages sends every file with
+`Cache-Control: max-age=600`, and the first phone test caught what that
+does: a plain `fetch` inside the worker returned a ten-minute-old build
+while online, and the precache filled itself from the same stale copies.
+What the worker does now, and why each piece is there (an adversarial
+review of the first version of this change found the gaps):
+
+- Every request is fetched with `cache: "no-cache"` (revalidate with the
+  server — a 304 when nothing changed, one round trip) via `fetch(url,
+  init)`, not `new Request(navigationRequest, init)`, which older engines
+  refuse. A 404 or 5xx while a good copy exists is answered from the
+  cache. On a link that is up but silent, the cached copy is served after
+  3.5 s rather than a white page.
+- The precache uses `cache: "reload"` (bypass the HTTP cache), scripts
+  before the two page entries, so a partial failure cannot leave the HTTP
+  cache holding a fresh page next to stale scripts. A failed precache is
+  logged and leaves the previous worker in charge.
+- The build version is a literal in `sw.js` (`BUILD`), equal to
+  `CONFIG.version` and `package.json` — the rules tests enforce all
+  three. It has to be in the worker file itself: WebKit's update check
+  compares only that file's bytes, so a bump that lived in an imported
+  script would never install on an iPhone. Registration passes
+  `updateViaCache: "none"` so the check bypasses the HTTP cache.
+- Activate retires only `lane7-*` caches (CacheStorage is per origin and
+  `zarah-ai-team.github.io` is shared with other projects), claims every
+  open page and tells it which build is serving. `main.js` compares that
+  with its own `CONFIG.version`: on the title it reloads at once,
+  otherwise before the next level or daily starts — never mid-round,
+  never on a first visit (nothing to differ from), never when the page is
+  already current. A page that loaded before the worker activated asks
+  the controller for its build on boot and on `controllerchange`.
+- A home-screen app resumes without a navigation, so `main.js` asks the
+  registration for an update check whenever the page becomes visible.
+- The title shows the version bottom-right, so "which build is this
+  phone on" is a glance, not a guess; `hud.js` guards that element
+  because for one open after a release the previous worker can pair an
+  older page with newer scripts.
+
+Known limits: the very first open after **this** release is still served
+by the previous worker with plain HTTP-cache semantics, so a phone that
+last played within ten minutes of the deploy can see the old build once
+more and the new one on the following open — every release after this
+one is covered by the announce-and-reload above. GitHub's CDN can serve a
+mixed build for a few minutes after a deploy; treat a release as live ten
+minutes after the workflow finishes. iOS Safari (browser tab, not
+home-screen) deletes all site storage — cache, worker and the save — after
+seven days without a visit; the home-screen install is exempt, which is
+one more reason to push it. `apple-mobile-web-app-*` metas and the 180 px touch icon
 cover iOS "Add to Home Screen", which is the closest thing to an app the
 web build gets.
 
@@ -406,7 +457,7 @@ should never cost a round — or a daily.
 6. The daily's "one attempt" is enforced per device (it lives in the save).
    Clearing site data is a second attempt. A server fixes that, and nothing
    else does.
-7. When testing service-worker changes on localhost, bump `VERSION` or
+7. When testing service-worker changes on localhost, bump `BUILD` or
    unregister the worker; the old cache serves the old build for one load.
 
 ## Porting

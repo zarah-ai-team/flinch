@@ -7,6 +7,12 @@
 var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = {});
 
 L7.CONFIG = {
+  // The build version. The service worker names its cache after it (so a
+  // bump retires the previous build on every phone) and the title shows
+  // it, so "which version am I on" is never a guess. Keep package.json in
+  // step.
+  version: "2.2.1",
+
   design: { w: 540, h: 960 },        // portrait phone design space
 
   rounds: 5,

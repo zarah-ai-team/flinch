@@ -1,6 +1,6 @@
 {
   "name": "flinch",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "private": true,
   "description": "Flinch — a reaction duel on a shooting range. Browser, portrait, no build step.",
   "scripts": {

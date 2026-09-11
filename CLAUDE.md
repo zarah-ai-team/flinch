@@ -23,7 +23,7 @@ development/
   lane7/
     index.html            shell, CSS, @font-face, script load order (order matters)
     manifest.webmanifest  PWA: fullscreen portrait, icons
-    sw.js                 service worker: precache SHELL, network-first; VERSION = release
+    sw.js                 service worker: precache (HTTP cache bypassed), revalidating network-first, announces its BUILD
     fonts/                Barlow + Barlow Condensed, Latin woff2, self-hosted
     icons/                generated — never hand-edit, run `npm run icons`
     src/config.js         EVERY gameplay tunable incl. the 10-level table, daily, haptics
@@ -71,7 +71,10 @@ npm run icons            # regenerate lane7/icons/ after touching the card geome
    `sim.rng` later in a round: the daily relies on the sequence being a
    function of the seed alone, whatever the player does.
 8. A new source file goes in `index.html`'s script list AND `sw.js`'s
-   `SHELL`. Bump `VERSION` in `sw.js` with `package.json` on every release.
+   `SHELL_FILES` (the tests check both). A release bumps the version in
+   three places — `BUILD` in `sw.js`, `CONFIG.version`, `package.json` —
+   and `npm test` fails if they disagree. `sw.js` never imports scripts:
+   iPhones compare only that file when looking for a new worker.
 9. `camelCase`, comment the *why* of non-obvious maths, complete files over
    fragments.
 
@@ -134,8 +137,11 @@ null otherwise. `Sim.startLevel(level, { mode, day })` sets them.
 - **itch.io**: zip the contents of `lane7/` without `test/`, `index.html` at
   the zip root, upload as an HTML project, viewport 540×960 or "mobile
   friendly", enable the fullscreen button.
-- **Before any release**: bump `package.json` version and `sw.js` `VERSION`
-  together; `npm test`; `npm run test:browser` and look at the shots.
+- **Before any release**: bump `BUILD` (sw.js), `CONFIG.version` and
+  `package.json` together; `npm test`; `npm run test:browser` and look at
+  the shots. Pages caches files for ten minutes and its CDN can serve a
+  mixed build for a few minutes after a deploy: call a release live ten
+  minutes after the workflow finishes.
 
 ## Open questions (from GDD.md — decide with play, not in code)
 

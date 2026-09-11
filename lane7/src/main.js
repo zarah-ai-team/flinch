@@ -32,6 +32,7 @@
   const canvas = document.getElementById("game");
   const renderer = new L7.Renderer({ canvas, sim, cfg: CONFIG, tweens, rng: L7.mulberry32(CONFIG.seed ^ 0xC0FFEE), camera, clock, reduced });
   const Sound = L7.Sound;
+  let pendingReload = false;   // a newer build's worker is serving this page: reload before the next level
 
   /* ---------- the daily ---------- */
   function dailyInfo() {
@@ -87,6 +88,7 @@
   });
 
   function startLevel(level) {
+    if (pendingReload) { location.reload(); return; }   // never mid-round: only here, between levels
     Sound.uiTap();
     sim.rng = L7.mulberry32(seedFor(level));
     sim.startLevel(level);
@@ -94,6 +96,7 @@
 
   // One attempt per UTC day; the seed is the day, so everyone gets the same range.
   function startDaily() {
+    if (pendingReload) { location.reload(); return; }   // before the daily is stamped as taken
     const d = dailyInfo();
     if (d.played) return;
     Sound.uiTap();
@@ -193,13 +196,38 @@
   /* ---------- lifecycle ---------- */
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { sim.abortRound(); Sound.ctx && Sound.ctx.suspend && Sound.ctx.suspend(); }
-    else { last = performance.now(); acc = 0; if (Sound.ctx && !Sound.muted) Sound.ctx.resume(); }
+    else {
+      last = performance.now(); acc = 0; if (Sound.ctx && !Sound.muted) Sound.ctx.resume();
+      // A home-screen app resumes without a navigation, so no update check
+      // would run on its own; ask for one when the page comes back.
+      if (navigator.serviceWorker && navigator.serviceWorker.getRegistration) navigator.serviceWorker.getRegistration().then((r) => r && r.update()).catch(() => {});
+    }
   });
 
   // Offline and home-screen install. Only over http(s): a service worker
   // cannot register from file://, and that path must keep working.
   if ("serviceWorker" in navigator && /^https?:/.test(location.protocol)) {
-    navigator.serviceWorker.register("sw.js").catch(() => { /* not fatal: the game runs without it */ });
+    // A new build's worker takes over the page as soon as it activates
+    // (clients.claim), but the scripts already running are whatever build
+    // loaded. The worker announces its build; if it is not this page's,
+    // reload — right away on the title, otherwise before the next level
+    // starts (never mid-round). A first visit has no worker to differ
+    // from, so it never reloads; a page that is already current is left
+    // alone.
+    const sw = navigator.serviceWorker;
+    const hadController = !!sw.controller;
+    const consider = (version) => {
+      if (!hadController || !version || version === CONFIG.version) return;
+      if (sim.state === "TITLE") location.reload(); else pendingReload = true;
+    };
+    sw.addEventListener("message", (ev) => { if (ev.data && ev.data.type === "lane7:worker") consider(ev.data.version); });
+    const ask = () => { if (sw.controller) sw.controller.postMessage({ type: "lane7:version?" }); };
+    sw.addEventListener("controllerchange", ask);
+    ask();                                              // a worker that activated before this script ran
+    sim.on("title", () => { if (pendingReload) location.reload(); });
+    // updateViaCache "none": the worker script is checked past the HTTP
+    // cache on every navigation, so a bump is seen on the next open.
+    sw.register("sw.js", { updateViaCache: "none" }).catch(() => { /* not fatal: the game runs without it */ });
   }
 
   /* ---------- boot ---------- */

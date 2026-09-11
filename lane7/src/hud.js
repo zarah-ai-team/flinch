@@ -30,8 +30,11 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
         overlay: $("overlay"), title: $("title"), kicker: $("kicker"), blurb: $("blurb"), rules: $("rules"), cue: $("cue"),
         levels: $("levels"), daily: $("daily"), dailyKicker: $("dailyKicker"), dailyText: $("dailyText"), dailyAction: $("dailyAction"),
         record: $("record"), actions: $("actions"), share: $("share"),
-        mute: $("mute"), reset: $("reset")
+        mute: $("mute"), reset: $("reset"), version: $("version")
       };
+      // Guarded: on the first open after a release, an older index.html can
+      // still be paired with this newer script by the previous worker.
+      if (this.el.version) this.el.version.textContent = "v" + this.cfg.version;
       this.buildPips();
       this.buildLevels();
       // Controls inside the stage must not fall through to the canvas as a shot.

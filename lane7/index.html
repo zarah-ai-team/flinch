@@ -302,6 +302,13 @@
   }
   #mute.off { color: var(--hot); }
 
+  /* Build version, bottom right of the title card: which build is this phone on? */
+  #version {
+    position: absolute; right: 14px; bottom: 24px;
+    font-size: 10px; letter-spacing: .08em; color: var(--dim); opacity: .7;
+    font-variant-numeric: tabular-nums; pointer-events: none;
+  }
+
   @media (prefers-reduced-motion: reduce) {
     #banner.show { transition: opacity .1s; }
     .score.pop { animation: none; }
@@ -363,6 +370,7 @@
       </div>
     </div>
     <span id="reset" hidden>Reset progress</span>
+    <span id="version"></span>
   </div>
 </div>
 
