@@ -66,8 +66,9 @@ npm run icons            # regenerate lane7/icons/ after touching the card geome
 6. Save format changes bump `SAVE_VERSION` and add a migration case in
    `store.js`; never remove old cases. Progression is written only through
    `recordLevelEnd`, which stays pure and tested.
-7. Every random number a round needs is drawn in `Sim.beginRound`. Never
-   call `sim.rng` later in a round: the daily relies on the sequence being a
+7. Every random number a round needs — spots, the mover's direction, the
+   hold wait, Lane 8's jitter — is drawn in `Sim.beginRound`. Never call
+   `sim.rng` later in a round: the daily relies on the sequence being a
    function of the seed alone, whatever the player does.
 8. A new source file goes in `index.html`'s script list AND `sw.js`'s
    `SHELL`. Bump `VERSION` in `sw.js` with `package.json` on every release.
@@ -77,8 +78,17 @@ npm run icons            # regenerate lane7/icons/ after touching the card geome
 ## Where to change common things
 
 - **Difficulty / new level** → `CONFIG.levels` row. Then `npm test` and read
-  the printed win-rate table; each level should move the wall ~50 ms. Ten
+  the printed win-rate table and the per-level decoy placement line; each
+  level should move the wall ~50 ms and place ≥ 90% of its decoys. Ten
   levels also drive the daily rotation (day mod level count).
+- **Movers** → the `drift` column (px/s) and `CONFIG.driftSweepSec`. The
+  Sim slides `target.x` in `step` during FIRE (`drift`, `driftAt`); the
+  renderer copies it into the target view each frame in `update()`; the hum
+  is `Sound.mover` on `go`. Two decoys is the most that fits beside one.
+- **Phone performance** → the big additive glows go through `GlowLayer`
+  (half resolution); the grain is one blit; the DPR cap and the governor
+  are in `main.js`. Never add a full-screen blend-mode pass or a
+  `backdrop-filter` over the canvas.
 - **Scoring** → `CONFIG.points`, `CONFIG.opponentPoints`. Note: with 5 rounds
   a draw is impossible (`8h + 6b = 15`); keep two heads > three losses.
 - **A new round rule** → add state or logic in `Sim`, emit an event, handle it
@@ -106,7 +116,7 @@ npm run icons            # regenerate lane7/icons/ after touching the card geome
 
 `title`, `level:start` {level, params, mode, day}, `round:begin` {round,
 target, decoys, from, moveMs}, `round:restart`, `hold` {holdMs}, `go`
-{oppReactMs}, `shot:player` {zone: head|body|card|decoy|miss, x, y, lx, ly,
+{oppReactMs, drift}, `shot:player` {zone: head|body|card|decoy|miss, x, y, lx, ly,
 reactMs, pts, best}, `shot:opponent` {late, reactMs}, `false-start`
 {round, during: ARM|HOLD}, `banner:end`, `level:end` {level, won, tied,
 mode, day, youScore, oppScore, next, complete}.

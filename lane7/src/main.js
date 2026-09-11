@@ -53,7 +53,10 @@
   /* ---------- sound follows the Sim ---------- */
   sim.on("round:begin", (e) => Sound.motor(e.moveMs / 1000 + 0.05, Sound.panAt(e.target.x)));
   sim.on("hold", () => Sound.ready());
-  sim.on("go", () => { Sound.buzzer(); Sound.lampOn(Sound.panAt(sim.target.x)); });
+  sim.on("go", (e) => {
+    Sound.buzzer(); Sound.lampOn(Sound.panAt(sim.target.x));
+    if (e.drift) Sound.mover(Math.min(1.5, e.oppReactMs / 1000 + 0.3), Sound.panAt(sim.target.x));
+  });
   sim.on("shot:player", (e) => {
     Sound.shot(-0.15); Sound.casing();
     const pan = Sound.panAt(e.x);
@@ -64,7 +67,7 @@
     if (e.best) Sound.best();
     // Haptics where the platform has them (Android). Never under reduced motion.
     const buzz = CONFIG.haptics[e.zone];
-    const activated = !navigator.userActivation || navigator.userActivation.hasBeenActive;   // scripted shots have no gesture
+    const activated = !!(navigator.userActivation && navigator.userActivation.hasBeenActive);   // a scripted shot has no gesture
     if (buzz && !reduced && navigator.vibrate && activated) { try { navigator.vibrate(buzz); } catch (_) { /* denied — fine */ } }
   });
   sim.on("shot:opponent", () => Sound.oppShot());
@@ -133,8 +136,11 @@
 
   /* ---------- sizing and quality ---------- */
   // ?q=max pins full resolution (screenshots, demos); ?q=low starts low.
+  // Phones start at 1.5× device pixels: the art is soft-edged and lit, so
+  // the difference from 2× is invisible and the fill cost is 44% lower.
   const qParam = new URLSearchParams(location.search).get("q");
-  const quality = { dprCap: qParam === "low" ? 1 : 2, frames: 0, slow: 0, warm: 0, locked: qParam === "max" };
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
+  const quality = { dprCap: qParam === "low" ? 1 : coarse ? 1.5 : 2, frames: 0, slow: 0, warm: 0, locked: qParam === "max" };
   let lastCssW = 0;
   function resize() {
     const r = canvas.getBoundingClientRect();
@@ -143,18 +149,22 @@
     renderer.setScale((r.width / W) * dpr);
   }
   window.addEventListener("resize", resize);
+  // The canvas reports its own size changes; reading its rect every frame
+  // would force a layout pass whenever the HUD animates.
+  const hasRO = typeof ResizeObserver !== "undefined";
+  if (hasRO) new ResizeObserver(() => resize()).observe(canvas);
 
-  // If frames keep missing budget, step the resolution down once and
-  // drop the grain. Never steps back up: oscillating quality is worse
-  // than steady lower quality.
+  // If frames keep missing budget, step the resolution down and drop the
+  // grain. Checked every 1.5 s after a 1 s warm-up; steps 2 → 1.5 → 1.25 → 1.
+  // Never steps back up: oscillating quality is worse than steady lower quality.
   function sampleQuality(dtReal) {
     if (quality.locked) return;
-    if (quality.warm < 120) { quality.warm++; return; }
-    quality.frames++; if (dtReal > 0.024) quality.slow++;
-    if (quality.frames >= 180) {
-      if (quality.slow > 70 && quality.dprCap > 1) {
-        quality.dprCap = quality.dprCap > 1.5 ? 1.5 : 1;
-        renderer.grainOn = false;
+    if (quality.warm < 60) { quality.warm++; return; }
+    quality.frames++; if (dtReal > 0.021) quality.slow++;
+    if (quality.frames >= 90) {
+      if (quality.slow > 27 && quality.dprCap > 1) {
+        quality.dprCap = Math.max(1, quality.dprCap - (quality.dprCap > 1.5 ? 0.5 : 0.25));
+        if (quality.dprCap <= 1.25) renderer.grainOn = false;
         resize();
       }
       quality.frames = 0; quality.slow = 0;
@@ -174,8 +184,7 @@
     camera.update(dtReal);
     renderer.update(dtGame);
     hud.update(now);
-    const r = canvas.getBoundingClientRect();
-    if (Math.abs(r.width - lastCssW) > 0.5) resize();
+    if (!hasRO) { const r = canvas.getBoundingClientRect(); if (Math.abs(r.width - lastCssW) > 0.5) resize(); }
     renderer.draw();
     sampleQuality(dtReal);
     requestAnimationFrame(loop);

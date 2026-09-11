@@ -3,10 +3,11 @@
 **Status:** v2.1 build playable in browser (`lane7/index.html`). Random carrier
 placement, 5 rounds, 10 levels, no-shoot cards and the full feel pass are in
 (v2). v2.1 adds the level select, per-level bests, the daily challenge, share,
-the shooter's pistol and installs to a phone home screen.
-Not yet fun-verified on a real phone.
+the shooter's pistol and installs to a phone home screen. v2.2 follows the
+first phone test: every level is harder, movers arrive at level 6, the hit
+is rebuilt and the renderer is cut down for phone GPUs.
 **Target:** iOS App Store, portrait, one hand, free with no ads until proven.
-**Last updated:** 11 Sep 2026 (v2.1). v1 and v2 notes preserved where still true.
+**Last updated:** 11 Sep 2026 (v2.2). v1 and v2 notes preserved where still true.
 
 ---
 
@@ -46,17 +47,20 @@ v1 was pure timing: the target was always in the same place, so the only
 question was *when*. v2 asks three questions at once, and the level table
 turns each one up on its own dial:
 
-- **When** — Lane 8's reaction time falls from ~1100 ms at level 1 to
-  ~510 ms at level 10. The floor is 420 ms; nobody reliably taps a located
-  target faster than that on a phone, so a level is never unwinnable.
+- **When** — Lane 8's reaction time falls from ~855 ms at level 1 to
+  ~440 ms at level 10. The floor is 400 ms; a located tap under that is
+  rare enough on a phone that a level is never unwinnable, only brutal.
 - **Where** — the carrier stops at a random depth and lateral position.
   Near targets are big and low on screen, far ones small and high. Level 1
   barely moves it; level 10 uses the whole bay.
 - **What you can see** — the bay gets darker while you wait (by level 7 you
-  see nothing until the lamp), the lamp itself gets dimmer, and from level 6
+  see nothing until the lamp), the lamp itself gets dimmer, and from level 3
   white NO-SHOOT cards hang beside the target with their own lamps. The
   buzzer tells you *now*; the lamp tells you *roughly where*; you still have
   to pick the manila card out and hit it.
+- **Whether it holds still** (v2.2) — from level 6 the carrier is a mover:
+  the card slides sideways the moment it turns, faster every level, and
+  bounces off the lane edge. You aim at where it is, not where it parked.
 
 ## Rules
 
@@ -97,21 +101,35 @@ Every number below lives in `CONFIG.levels`; the game reads nothing else to
 decide difficulty. `opp` is Lane 8's reaction lerped from round 1 to round 5,
 ±80 ms jitter, floored at 420.
 
-| Lv | Name | Lane 8 (ms) | Hold wait (ms) | Depth | Spread | Light while waiting | Lamp | Decoys |
-|---|---|---|---|---|---|---|---|---|
-| 1 | Warm-up | 1200→1000 | 1200–2600 | near | 35% | full | 100% | 0 |
-| 2 | Range hot | 1100→920 | 1100–2800 | near | 55% | 85% | 100% | 0 |
-| 3 | Downrange | 1000→840 | 1000–3000 | near–mid | 70% | 65% | 95% | 0 |
-| 4 | Lights low | 920→760 | 1000–3200 | mid | 80% | 40% | 90% | 0 |
-| 5 | Lights out | 850→700 | 900–3400 | mid | 90% | 15% | 85% | 0 |
-| 6 | No-shoot | 800→660 | 900–3600 | mid–far | 100% | 5% | 80% | 1 |
-| 7 | Hostage bay | 750→620 | 800–3800 | mid–far | 100% | dark | 75% | 1 |
-| 8 | Night bay | 700→580 | 800–4000 | far | 100% | dark | 68% | 2 |
-| 9 | Hair trigger | 620→520 | 700–4200 | far | 100% | dark | 60% | 2 |
-| 10 | Lane 8 | 560→460 | 700–4500 | far | 100% | dark | 52% | 2 |
+| Lv | Name | Lane 8 (ms) | Hold wait (ms) | Depth | Spread | Light while waiting | Lamp | Decoys | Mover (px/s) |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | Warm-up | 900→810 | 1000–2600 | near | 50% | full | 100% | 0 | 0 |
+| 2 | Range hot | 840→750 | 1000–2800 | near | 70% | 80% | 100% | 0 | 0 |
+| 3 | No-shoot | 780→700 | 900–3000 | near–mid | 85% | 60% | 95% | 1 | 0 |
+| 4 | Lights low | 730→650 | 900–3200 | mid | 100% | 30% | 90% | 1 | 0 |
+| 5 | Lights out | 680→600 | 800–3400 | mid | 100% | 5% | 85% | 1 | 0 |
+| 6 | Movers | 630→560 | 800–3600 | mid–far | 100% | dark | 80% | 1 | 50 |
+| 7 | Hostage bay | 590→520 | 700–3800 | mid–far | 100% | dark | 72% | 2 | 65 |
+| 8 | Night bay | 550→490 | 700–4000 | far | 100% | dark | 64% | 2 | 80 |
+| 9 | Hair trigger | 510→450 | 600–4300 | far | 100% | dark | 56% | 2 | 95 |
+| 10 | Lane 8 | 470→410 | 600–4600 | far | 100% | dark | 48% | 2 | 110 |
 
-The names are the tutorial. "Lights out" is the level the bay goes dark;
-"No-shoot" is the level the white cards appear. Nothing else explains them.
+The names are the tutorial. "No-shoot" is the level the white cards appear,
+"Lights out" the level the bay goes dark, "Movers" the level the carrier
+starts sliding. Nothing else explains them.
+
+### Why v2.2 is harder
+
+The first phone test said levels 1–5 were a formality and the same thing
+five times over. They were: Lane 8 opened at ~1100 ms, which anyone under
+~700 ms beat without looking, and nothing but his speed changed until
+level 6. v2.2 starts him ~250 ms faster, moves the wall ~50 ms a level all
+the way up, and turns a new dial every step: spread at 2, the first white
+card at 3, the dark at 4–5, the mover at 6, the second card and the
+distance at 7–8, the mover's speed and a dimmer lamp at 9–10, with Lane 8
+on the 400 ms floor at the end. Level 10 wants a genuine ~440 ms located
+tap on a card that is small, dim, moving and flanked. If nobody clears it
+in a week, raise `opp` on levels 8–10 by 40 ms; don't touch the floor.
 
 Win → next level unlocks (the title screen offers it). Lose → replay. Beat
 level 10 → "Range master", and level 10 stays open as the ranked-ladder
@@ -135,19 +153,21 @@ gambles, no search time (`node test/sim.test.js` prints this):
 
 ```
 win rate %      L1   L2   L3   L4   L5   L6   L7   L8   L9  L10
-  450 ms       100  100  100  100  100  100  100  100   96   79
-  520 ms       100  100  100  100  100  100  100  100   83   38
-  600 ms       100  100  100  100  100  100  100   88   38    0
-  680 ms       100  100  100  100  100   92   71   17    0    0
-  780 ms       100  100  100  100   54   21    0    0    0    0
-  900 ms       100  100   75   17    0    0    0    0    0    0
+  400 ms       100  100  100  100  100  100   96  100  100  100
+  450 ms       100  100  100  100  100  100  100  100   75   42
+  500 ms       100  100  100  100  100  100   96   71   13    4
+  560 ms       100  100  100  100   96   92   54   13    4    0
+  640 ms       100  100  100   96   63   38    4    0    0    0
+  740 ms       100   92   88    8    0    0    0    0    0    0
 ```
 
-Real thumbs have far more variance than ±40 ms, and the dark bay and decoys
-add search time the simulation doesn't model, so real curves will be softer
-and shifted right. The shape is what matters: each level moves the wall by
-roughly 50 ms, levels 1–4 forgive a slow phone, and level 10 needs a genuine
-~500 ms located tap. That is the "very difficult" the brief asked for.
+Real thumbs have far more variance than ±40 ms, and the dark bay, the
+decoys and the mover add search and tracking time the simulation doesn't
+model (its player aims at the card's live position perfectly), so real
+curves will be softer and shifted right. The shape is what matters: each
+level moves the wall by roughly 50 ms, a 640 ms player stalls around level
+5, a 560 ms player around level 7, and level 10 needs a genuine ~450 ms
+located tap. That is the "very difficult" the brief asked for.
 
 ## Daily challenge (v2.1)
 
@@ -182,8 +202,25 @@ The white NO-SHOOT card adds a second skill — identification — that a fast
 but careless player fails and a careful one passes. It is straight out of
 real turning-target ranges (hostage / no-shoot cards), so it costs no fiction.
 Decoys roam the whole bay: one can hang in front of the target, partly
-covering it, as long as the target's head stays clear. Hitting a decoy is a
-lost round, no worse; the punishment is the round, not a special penalty.
+covering it, as long as the target's head stays clear — everywhere along
+the path a mover will take before Lane 8 fires. Hitting a decoy is a lost
+round, no worse; the punishment is the round, not a special penalty. Two
+is the most the bay can hold beside a mover; a third fitted so rarely that
+"three decoys" would have been a lie on the level card.
+
+## Movers (v2.2)
+
+From level 6 the carrier slides sideways while the card is exposed and
+reverses at the lane edge, at a speed set per level. It starts moving the
+instant the light goes green, so the spot you watched it park in (on the
+lit levels) or the spot the lamp reveals (in the dark) is already wrong by
+the time your thumb lands. That is the third skill after timing and
+identification: tracking. It is straight out of real ranges — movers are
+a standard qualification stage — so it costs no fiction, and it is the
+reason the top levels can be hard without Lane 8 becoming impossible. The
+mover's hum is panned to where the card is going; on headphones it is a
+tell. Hit-testing reads the live position, so a shot lands exactly where
+the card is drawn.
 
 ## Reaction feedback
 
@@ -191,6 +228,13 @@ Every hit shows its reaction time rolling up from zero, tagged Lightning
 (<300 ms), Sharp (<420), Steady (<560) or Late. The best time is the number
 the title screen leads with. It is the number players will screenshot; keep
 it prominent and keep it honest.
+
+**The hit itself** (v2.2): a streak from the muzzle to the impact for
+three frames, a four-point flash star over an oversize hole that punches in
+and settles, paper chips, a few bigger torn pieces that flutter, a puff of
+paper dust, a ring on both head and body, and a "+5" or "+3" that rises
+from the hole. All of it lands inside the hit-stop, so the freeze frame is
+the loud one.
 
 **A new best is a moment** (v2.1): a gold ring that outlives the hit, extra
 sparks, a warm flash, the lamp jolting on its arm, a three-note chime a beat
@@ -219,8 +263,9 @@ most once per session on average, so it can afford to be loud.
 2. Is the dark hold (levels 5+) tense or annoying? Watch faces, not scores.
 3. Is the level-6 decoy a "wait, what?" moment or a "that's unfair" moment?
    The level name should carry it; if it doesn't, add one line to the card.
-4. Level 10 at ~510 ms: is anyone beating it? If nobody does within a week,
-   raise `opp` by 40 ms across levels 8–10 — don't touch the floor.
+4. Level 10 at ~440 ms with a 110 px/s mover: is anyone beating it? If
+   nobody does within a week, raise `opp` by 40 ms across levels 8–10 —
+   don't touch the floor.
 5. Does the 300 ms grace after a skipped banner feel right, or do people
    still tap into a false start?
 6. Card sizes at far depth: head is ~29 pt across on a 390 pt phone. Fair, or
@@ -233,12 +278,17 @@ most once per session on average, so it can afford to be loud.
    if it still bothers anyone, shrink `LOOK.gun.barrel` before removing it.
 9. Do people replay cleared levels for a better time, or only push forward?
    If nobody replays, the per-level bests can go and the chips get simpler.
+10. Movers: does a card that slides feel like a range or like a cheat? If it
+    reads as unfair, slow the top speeds before removing them; the hum and
+    the lamp moving with the trolley are the honesty cues.
+11. Did v2.2 fix the phone lag? Check the quality governor's resolution cap
+    after a few rounds; if it has stepped down, the phone is still short.
 
 ## Later, if the loop holds
 
 Ranked reaction ladder on level 10, and a daily leaderboard once there is a
-server to trust. Moving carriers (the target slides while exposed). A duel
-skin at the cost of a 17+ rating.
+server to trust. Decoys that move too. A duel skin at the cost of a 17+
+rating.
 
 ## Art direction
 
@@ -276,10 +326,11 @@ On the title the range is idling: the parked card sways, the lamp shade
 drifts in a draft, and every few seconds the old tube stutters.
 
 Feel: trauma-based shake (squared, so bodies tap and heads land), a zoom
-punch toward the hit, 70 ms hit-stop then 340 ms slow motion on a head, paper
-chips, sparks, an expanding ring, an impact flash, smoke and an ejected
-casing on every shot, dust drifting in the lamp beams, vignette and a touch
-of grain. Short haptics on hits where the platform has them. Reduced-motion
+punch toward the hit, 70 ms hit-stop then 340 ms slow motion on a head, a
+muzzle-to-impact streak, an impact flash and star, holes that punch in
+oversize, paper chips and torn pieces, paper dust, sparks, an expanding
+ring, a rising score, smoke and an ejected casing on every shot, dust
+drifting in the lamp beams, vignette and a touch of grain. Short haptics on hits where the platform has them. Reduced-motion
 users get none of the shake, recoil, slow motion or haptics and the same
 information.
 

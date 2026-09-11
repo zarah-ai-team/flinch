@@ -10,7 +10,7 @@ file. `lane7.html` in the parent folder is the v1 single-file prototype,
 kept for reference only.
 **Next platform:** Godot 4 (GDScript) → iOS, or Phaser 3 + Capacitor if we
 stay web-first. See the porting section.
-**Last updated:** 11 Sep 2026 (v2.1)
+**Last updated:** 11 Sep 2026 (v2.2)
 
 ---
 
@@ -143,9 +143,9 @@ flicker. v1 shared one stream, so the shake consumed numbers at a rate that
 depended on how long the player took to shoot — replays were impossible in
 practice.
 
-Every random number a round needs — the target spot, the decoy spots, the
-hold wait and Lane 8's jittered reaction — is drawn in `beginRound`, before
-the player can do anything. v2 drew the hold wait in `toHold` and the jitter
+Every random number a round needs — the target spot, the mover's
+direction, the decoy spots, the hold wait and Lane 8's jittered reaction —
+is drawn in `beginRound`, before the player can do anything. v2 drew the hold wait in `toHold` and the jitter
 in `goGreen`; a false start skipped `goGreen`, so the sequence shifted and
 two players on one seed diverged from that round on. Now the sequence is a
 function of the seed alone, which is what the daily needs. The only thing
@@ -187,8 +187,31 @@ overlap by at most ~30% of their width; cards at clearly different depths may
 layer — the near one paints in front — provided the far card's head circle
 (plus 12 px) is clear of the near card and at least 40% of its width shows.
 Without layering the bay physically cannot hold three cards; with it, 400
-samples per decoy place them 99.7% of the time, and a decoy that cannot be
-placed is simply skipped for that round (never overlapped).
+samples per decoy place them ~95% of the time overall (100% on static
+levels, ~90% beside the fastest movers), and a decoy that cannot be placed
+is simply skipped for that round (never overlapped).
+
+Beside a mover, a decoy must also be clear of the target everywhere along
+the path the carrier will take before Lane 8 can possibly fire — the
+level's slowest reaction plus jitter, capped by `driftSweepSec`. The path
+is sampled every ~30 px with bounces applied (`Sim.driftAt`), plus the lane
+edge itself if it bounces, and the direction is known because it is drawn
+before the decoys are placed. Checking both directions instead (v2.2's
+first attempt) halved placement; three decoys never fit at all and were
+dropped from the table.
+
+## Movers
+
+`params.drift` is a speed in design px/s. `beginRound` picks the sign and
+computes the lane bounds at the target's depth (`driftMin/Max`, the same
+reach `perspective` uses); `step` slides `target.x` only while the state is
+FIRE and reverses at a bound; `go` carries the signed speed so the sound
+can hum in the right ear. Hit-testing reads `target.x` live, and the
+renderer copies it into the target's view every frame while the card is
+exposed, so picture and rules agree to the pixel. The carrier tween that
+brought the card in has finished before HOLD, so nothing fights over x.
+Holes are card-local and so ride along; the next round's carrier move
+starts from wherever the mover stopped.
 
 ## Hit detection
 
@@ -236,6 +259,53 @@ the muzzle flash and a wash of whatever the lane signal is showing. The
 muzzle tip, ejection port and every recoil number live in `LOOK.gun`.
 Nothing about it touches the Sim: a shot is a shot whether the gun is drawn
 or not, and reduced motion simply skips the recoil.
+
+## Phone performance (v2.2)
+
+The first phone test called the game laggy. CPU time per frame was under a
+millisecond on desktop, so the cost was GPU fill rate: at 2× device pixels
+a frame blitted the backdrop, the light layer, the vignette, two or three
+lamp pools each the size of the screen with `lighter`, and 45 grain tiles
+under `overlay` — a non-separable blend that mobile Skia and WebKit take
+slow paths for — plus a `backdrop-filter` blur on the title overlay that
+re-blurred the live canvas every frame. What changed:
+
+- **Glow layer.** All the big soft additive glows (pools, lamp cores, the
+  signal, the muzzle, Lane 8's flash) draw into a half-resolution canvas
+  with `lighter` and land on the world as one blit (`GlowLayer`, next to
+  `LightLayer`). Sparks, dust, rings, the tracer and the impact star stay
+  full-resolution because their edges matter. A frame's additive fill went
+  from ~3 screens to ~1.
+- **Grain** is pre-tiled into one oversize sheet and drawn once with
+  `source-over` at 5% — one blit, no blend mode.
+- **No `backdrop-filter`** on the overlay; the gradient is a little darker
+  instead.
+- **Device pixels start at 1.5× on touch devices** (`pointer: coarse`),
+  2× elsewhere; the art is lit and soft so the difference is invisible and
+  the fill is 44% lower. The governor now decides every 1.5 s after a 1 s
+  warm-up and steps 2 → 1.5 → 1.25 → 1, dropping the grain at 1.25.
+- **`desynchronized: true`** on the 2D context lets Chrome skip the
+  compositor queue for the canvas, which is a measurable cut in tap-to-
+  photon latency on Android.
+- The canvas's size is watched with a `ResizeObserver` instead of a
+  `getBoundingClientRect` per frame (a forced layout whenever the HUD
+  animates), and the draw order array is reused rather than sliced.
+
+None of this was measured on the phone that lagged; it was reasoned from
+the frame composition. `L7.game.quality.dprCap` after a few rounds says
+whether the governor had to step down.
+
+## The hit
+
+Everything at the impact is presentation on top of one `shot:player`
+event. The tracer is two strokes from the pistol's muzzle to the hit,
+real-time, gone in 60 ms. The impact flash and the four-point star share
+one entry in `flashes` (real time, so they read through the hit-stop).
+The hole sprite draws at 1.8× and settles to 1× over 120 ms on the game
+clock, so hit-stop freezes it at its largest. Paper chips, four larger
+torn pieces with more drag, and two small smoke puffs come from the
+existing pooled emitters with overrides. The score float is a baked text
+sprite (no text layout mid-hit) that rises 54 px and fades in real time.
 
 ## Sprites and resolution
 
@@ -323,14 +393,16 @@ should never cost a round — or a daily.
 ## Known issues
 
 1. No real-device measurements yet. Headless numbers are software-rendered
-   and meaningless; the governor exists precisely because we haven't
-   measured. The pistol adds a dozen polygon fills per frame; unmeasured.
+   and meaningless; the v2.2 fill-rate work was reasoned, not measured.
+   The governor exists precisely because we haven't measured.
 2. No gamepad. The action layer is ready for one (`input.js`).
 3. Reaction is measured from state change, not paint (see Timing).
 4. The Sim's `abortRound` picks a new spot; a strict "resume where you were"
    would need the hold timer preserved. Not worth it. On the daily this is
    the one way two players' runs can diverge.
-5. Haptics are Android-only; iOS Safari has no `navigator.vibrate`.
+5. Haptics are Android-only; iOS Safari has no `navigator.vibrate`. They
+   also require a real user gesture in the session, so a scripted shot
+   (tests, the console) never buzzes.
 6. The daily's "one attempt" is enforced per device (it lives in the save).
    Clearing site data is a second attempt. A server fixes that, and nothing
    else does.

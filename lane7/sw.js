@@ -8,7 +8,7 @@
    package.json): the activate step throws away every other cache, and
    that is the only way an old build ever leaves a phone.
    =================================================================== */
-const VERSION = "lane7-2.1.0";
+const VERSION = "lane7-2.2.0";
 const SHELL = [
   "./", "./index.html", "./manifest.webmanifest",
   "./src/config.js", "./src/rng.js", "./src/store.js", "./src/daily.js", "./src/shapes.js",

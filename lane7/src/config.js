@@ -18,7 +18,14 @@ L7.CONFIG = {
   // physically unwinnable: nobody reliably taps a located target in
   // under ~400ms on a phone.
   opponentJitterMs: 80,
-  opponentFloorMs: 420,
+  opponentFloorMs: 400,
+
+  // Movers. A level's `drift` is how fast the carrier slides sideways
+  // (design px/s) while the card is exposed; it bounces off the lane
+  // edges. Decoys are kept clear of the path the target will take before
+  // Lane 8 fires — the level's slowest reaction plus jitter — so a white
+  // card never slides over the head. `driftSweepSec` caps that window.
+  driftSweepSec: 0.8,
 
   // Round timeline. ARM is the carrier moving to its new spot; taps in
   // its first `armGraceMs` are ignored (not punished) so a tap-to-skip
@@ -88,18 +95,25 @@ L7.CONFIG = {
                   carrier park, 0 pitch black until the lamp snaps on
        lamp       brightness/size of the lamp over the target at GO
        decoys     white NO-SHOOT cards that turn with the target
-       turnMs     how fast the card snaps face-on                       */
+       drift      mover speed while exposed, design px/s (0 = static)
+       turnMs     how fast the card snaps face-on
+
+     The wall moves ~50 ms a level. Levels 1–2 are lit and static, 3 adds
+     the first no-shoot, 4–5 take the light away, 6 starts the carrier
+     moving, 7–8 add a second decoy and distance, 9–10 push the mover,
+     dim the lamp and put Lane 8 at the floor. Two decoys is the most the
+     bay can hold next to a mover; a third fits so rarely it was a lie.  */
   levels: [
-    { name: "Warm-up",      opp: [1200, 1000], hold: [1200, 2600], dist: [0.00, 0.15], spread: 0.35, holdLight: 1.00, lamp: 1.00, decoys: 0, turnMs: 120 },
-    { name: "Range hot",    opp: [1100,  920], hold: [1100, 2800], dist: [0.00, 0.30], spread: 0.55, holdLight: 0.85, lamp: 1.00, decoys: 0, turnMs: 115 },
-    { name: "Downrange",    opp: [1000,  840], hold: [1000, 3000], dist: [0.10, 0.45], spread: 0.70, holdLight: 0.65, lamp: 0.95, decoys: 0, turnMs: 110 },
-    { name: "Lights low",   opp: [ 920,  760], hold: [1000, 3200], dist: [0.15, 0.55], spread: 0.80, holdLight: 0.40, lamp: 0.90, decoys: 0, turnMs: 105 },
-    { name: "Lights out",   opp: [ 850,  700], hold: [ 900, 3400], dist: [0.20, 0.65], spread: 0.90, holdLight: 0.15, lamp: 0.85, decoys: 0, turnMs: 100 },
-    { name: "No-shoot",     opp: [ 800,  660], hold: [ 900, 3600], dist: [0.20, 0.75], spread: 1.00, holdLight: 0.05, lamp: 0.80, decoys: 1, turnMs:  95 },
-    { name: "Hostage bay",  opp: [ 750,  620], hold: [ 800, 3800], dist: [0.25, 0.85], spread: 1.00, holdLight: 0.00, lamp: 0.75, decoys: 1, turnMs:  90 },
-    { name: "Night bay",    opp: [ 700,  580], hold: [ 800, 4000], dist: [0.30, 0.90], spread: 1.00, holdLight: 0.00, lamp: 0.68, decoys: 2, turnMs:  85 },
-    { name: "Hair trigger", opp: [ 620,  520], hold: [ 700, 4200], dist: [0.35, 1.00], spread: 1.00, holdLight: 0.00, lamp: 0.60, decoys: 2, turnMs:  80 },
-    { name: "Lane 8",       opp: [ 560,  460], hold: [ 700, 4500], dist: [0.40, 1.00], spread: 1.00, holdLight: 0.00, lamp: 0.52, decoys: 2, turnMs:  75 }
+    { name: "Warm-up",      opp: [ 900,  810], hold: [1000, 2600], dist: [0.00, 0.25], spread: 0.50, holdLight: 1.00, lamp: 1.00, decoys: 0, drift:   0, turnMs: 120 },
+    { name: "Range hot",    opp: [ 840,  750], hold: [1000, 2800], dist: [0.00, 0.40], spread: 0.70, holdLight: 0.80, lamp: 1.00, decoys: 0, drift:   0, turnMs: 115 },
+    { name: "No-shoot",     opp: [ 780,  700], hold: [ 900, 3000], dist: [0.10, 0.50], spread: 0.85, holdLight: 0.60, lamp: 0.95, decoys: 1, drift:   0, turnMs: 110 },
+    { name: "Lights low",   opp: [ 730,  650], hold: [ 900, 3200], dist: [0.15, 0.60], spread: 1.00, holdLight: 0.30, lamp: 0.90, decoys: 1, drift:   0, turnMs: 105 },
+    { name: "Lights out",   opp: [ 680,  600], hold: [ 800, 3400], dist: [0.20, 0.70], spread: 1.00, holdLight: 0.05, lamp: 0.85, decoys: 1, drift:   0, turnMs: 100 },
+    { name: "Movers",       opp: [ 630,  560], hold: [ 800, 3600], dist: [0.20, 0.80], spread: 1.00, holdLight: 0.00, lamp: 0.80, decoys: 1, drift:  50, turnMs:  95 },
+    { name: "Hostage bay",  opp: [ 590,  520], hold: [ 700, 3800], dist: [0.30, 0.85], spread: 1.00, holdLight: 0.00, lamp: 0.72, decoys: 2, drift:  65, turnMs:  90 },
+    { name: "Night bay",    opp: [ 550,  490], hold: [ 700, 4000], dist: [0.35, 0.90], spread: 1.00, holdLight: 0.00, lamp: 0.64, decoys: 2, drift:  80, turnMs:  85 },
+    { name: "Hair trigger", opp: [ 510,  450], hold: [ 600, 4300], dist: [0.40, 1.00], spread: 1.00, holdLight: 0.00, lamp: 0.56, decoys: 2, drift:  95, turnMs:  80 },
+    { name: "Lane 8",       opp: [ 470,  410], hold: [ 600, 4600], dist: [0.45, 1.00], spread: 1.00, holdLight: 0.00, lamp: 0.48, decoys: 2, drift: 110, turnMs:  75 }
   ]
 };
 

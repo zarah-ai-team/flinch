@@ -64,6 +64,8 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       this.lastReactMs = null;
       this.bestReactMs = opts.bestReactMs ?? null;
       this.pendingOppShot = -1;   // countdown to Lane 8's "you missed, I didn't" shot
+      this.driftV = 0;            // mover speed this round, signed px/s; 0 on static levels
+      this.driftMin = 0; this.driftMax = 0;
     }
 
     /* ---------- events ---------- */
@@ -125,12 +127,32 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
     // white card can hang in front of the target or far behind it, and
     // picking the manila one out is the skill being tested. If no legal
     // spot exists for a decoy this round, it simply doesn't appear.
-    placeDecoys(target, n) {
+    // Where a mover that starts at x0 with velocity v is after t seconds,
+    // bounces off the lane edges included.
+    driftAt(x0, v, t) {
+      let x = x0 + v * t;
+      if (this.driftMax <= this.driftMin) return this.driftMin;
+      while (x < this.driftMin || x > this.driftMax) x = x < this.driftMin ? 2 * this.driftMin - x : 2 * this.driftMax - x;
+      return x;
+    }
+
+    // `exposure` is the longest the card can be live before Lane 8 fires. A
+    // decoy has to be clear of the target everywhere along the path the
+    // mover will actually take in that time — sampled every ~30 px, and at
+    // the lane edge if it bounces — or a white card could slide over the head.
+    placeDecoys(target, n, exposure = 0) {
       const out = [];
+      const spots = [target];
+      if (exposure > 0 && this.driftV) {
+        const steps = Math.max(2, Math.ceil(Math.abs(this.driftV) * exposure / 30));
+        for (let k = 1; k <= steps; k++) spots.push(Object.assign({}, target, { x: this.driftAt(target.x, this.driftV, exposure * k / steps) }));
+        const edge = this.driftV > 0 ? this.driftMax : this.driftMin;
+        if (Math.abs(edge - target.x) < Math.abs(this.driftV) * exposure) spots.push(Object.assign({}, target, { x: edge }));
+      }
       for (let k = 0; k < n; k++) {
         for (let i = 0; i < this.cfg.placementTries; i++) {
           const c = this.perspective(this.rand(0, 1), this.rng() * 2 - 1);
-          if (this.separated(c, target) && out.every(o => this.separated(c, o))) { out.push(c); break; }
+          if (spots.every(t => this.separated(c, t)) && out.every(o => this.separated(c, o))) { out.push(c); break; }
         }
       }
       return out;
@@ -168,7 +190,14 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       this.round++;
       const prev = this.target;
       this.target = this.placeTarget(prev);
-      this.decoys = this.placeDecoys(this.target, this.params.decoys);
+      // Movers: pick the direction now (same reason as the rolls below) and
+      // the lane edges the carrier bounces between at this depth.
+      const drift = this.params.drift || 0;
+      const reach = Math.max(0, this.target.hw - (this.cfg.target.cardW / 2) * this.target.s - this.cfg.perspective.edgeMargin);
+      this.driftMin = this.cfg.design.w / 2 - reach; this.driftMax = this.cfg.design.w / 2 + reach;
+      this.driftV = drift ? drift * (this.rng() < 0.5 ? -1 : 1) : 0;
+      const exposure = Math.min(this.cfg.driftSweepSec, (this.params.opp[0] + this.cfg.opponentJitterMs) / 1000);
+      this.decoys = this.placeDecoys(this.target, this.params.decoys, exposure);
       const home = prev || this.perspective(0, 0);
       const dist = Math.hypot(this.target.x - home.x, this.target.y - home.y);
       this.moveMs = Math.round(lerp(this.cfg.moveMs[0], this.cfg.moveMs[1], clamp(dist / 360, 0, 1)));
@@ -199,7 +228,7 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
     goGreen(now) {
       this.state = "FIRE"; this.t = 0; this.exposed = true;
       this.greenAt = now;
-      this.emit("go", { round: this.round, oppReactMs: this.oppReactMs });
+      this.emit("go", { round: this.round, oppReactMs: this.oppReactMs, drift: this.driftV });
     }
 
     step(dt, now) {
@@ -224,9 +253,22 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       switch (this.state) {
         case "ARM":    if (this.t >= this.armFor) this.toHold(); break;
         case "HOLD":   if (this.t >= this.holdFor) this.goGreen(now); break;
-        case "FIRE":   if (now - this.greenAt >= this.oppReactMs) this.resolveOpponentShot(); break;
+        case "FIRE":
+          if (this.driftV) this.drift(dt);
+          if (now - this.greenAt >= this.oppReactMs) this.resolveOpponentShot();
+          break;
         case "BANNER": if (this.t >= this.bannerFor) this.endBanner(); break;
       }
+    }
+
+    // The mover slides while the card is exposed and reverses at the lane
+    // edge. Hit-testing reads the live position, so the shot lands where
+    // the card actually is.
+    drift(dt) {
+      let x = this.target.x + this.driftV * dt;
+      if (x < this.driftMin) { x = this.driftMin; this.driftV = -this.driftV; }
+      else if (x > this.driftMax) { x = this.driftMax; this.driftV = -this.driftV; }
+      this.target.x = x;
     }
 
     /* ---------- the one action ---------- */

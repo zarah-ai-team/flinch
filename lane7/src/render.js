@@ -54,8 +54,9 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       this.canvas = o.canvas; this.sim = o.sim; this.cfg = o.cfg;
       this.tweens = o.tweens; this.rng = o.rng; this.cam = o.camera; this.clock = o.clock;
       this.W = this.cfg.design.w; this.H = this.cfg.design.h;
-      this.ctx = this.canvas.getContext("2d", { alpha: false });
+      this.ctx = this.canvas.getContext("2d", { alpha: false, desynchronized: true });
       this.light = new L7.LightLayer(this.W, this.H);
+      this.glow = new L7.GlowLayer(this.W, this.H);
       this.scale = 1;
       this.reduced = !!o.reduced;
       this.grainOn = !this.reduced;
@@ -69,6 +70,10 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       this.rings = []; this.flashes = [];
       this.frame = 0;
       this.gun = { kick: 0, slide: 0 };
+      this.floats = [];                 // "+5" / "+3" rising from the hit
+      this.tracer = { a: 0, x: 0, y: 0 };
+      this.order = [];                  // draw order, reused every frame (no per-frame allocation)
+      this.byDepth = (a, b) => b.d - a.d;
       this.buildGun();
       this.titleFlickerIn = 2;
 
@@ -86,6 +91,7 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       this.canvas.width = Math.max(1, Math.round(this.W * pxPerUnit));
       this.canvas.height = Math.max(1, Math.round(this.H * pxPerUnit));
       this.light.resize(pxPerUnit);
+      this.glow.resize(pxPerUnit);
       const q = clamp(Math.round(pxPerUnit * 2) / 2, 1, 3);
       if (S.dpr !== q) { S.dpr = q; this.buildSprites(); this.buildEmitters(); }
     }
@@ -145,7 +151,30 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
         top.addColorStop(0, "rgba(3,6,7,.55)"); top.addColorStop(1, "rgba(3,6,7,0)");
         g.fillStyle = top; g.fillRect(0, 0, W, 120);
       }, 1);
-      sp.grain = [S.noise(128), S.noise(128)];
+      // Grain pre-tiled to one oversize sheet: a single low-alpha blit per
+      // frame instead of dozens of tiles under a blend mode phones hate.
+      sp.grain = [0, 1].map(() => S.make(W + 128, H + 128, (g, w, h) => {
+        const tile = S.noise(128, 1);
+        for (let y = 0; y < h; y += 128) for (let x = 0; x < w; x += 128) g.drawImage(tile.canvas, x, y, 128, 128);
+      }, 1));
+      // Four-point impact star, drawn additive over the hit for a few frames.
+      sp.star = S.make(64, 64, (g) => {
+        g.translate(32, 32);
+        g.fillStyle = "rgba(255,250,235,1)";
+        for (const a of [0, Math.PI / 2]) {
+          g.save(); g.rotate(a);
+          g.beginPath(); g.moveTo(-30, 0); g.lineTo(0, -3); g.lineTo(30, 0); g.lineTo(0, 3); g.closePath(); g.fill();
+          g.restore();
+        }
+        g.fillStyle = "rgba(255,240,200,.9)"; g.beginPath(); g.arc(0, 0, 4, 0, TAU); g.fill();
+      });
+      // Score floats, baked once so no text is laid out mid-hit.
+      const floatText = (txt) => S.make(80, 44, (g, w, h) => {
+        g.font = "700 34px 'Barlow Condensed', 'Arial Narrow', sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+        g.lineJoin = "round"; g.lineWidth = 5; g.strokeStyle = "rgba(8,10,10,.85)"; g.strokeText(txt, w / 2, h / 2 + 1);
+        g.fillStyle = "#e8d9b4"; g.fillText(txt, w / 2, h / 2 + 1);
+      });
+      sp.plus = { head: floatText("+" + this.cfg.points.head), body: floatText("+" + this.cfg.points.body) };
     }
 
     drawBackdrop(g, W, H, P) {
@@ -413,6 +442,7 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       this.em.spark.explode(3, gg.muzzle[0], gg.muzzle[1], { speed: [120, 260], angle: [230, 310], life: [0.05, 0.12] });
       this.em.casing.explode(1, gg.eject[0], gg.eject[1]);
       this.impact(e.x, e.y, e.zone === "head" ? 1.25 : 0.9);
+      this.trace(e.x, e.y);
 
       const view = e.zone === "decoy" ? this.cards.find(c => c.kind === "decoy" && c.index === e.index && c.alive) : this.target;
       if (e.zone === "head" || e.zone === "body") {
@@ -422,8 +452,12 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
         this.clock.hitstop(head ? F.hitstopMs.head : F.hitstopMs.body);
         if (head && !this.reduced) this.clock.slowMo(F.slowMo.scale, F.slowMo.ms);
         this.em.paper.explode(head ? 22 : 13, e.x, e.y);
+        // A few bigger torn pieces that flutter, and a puff of paper dust.
+        this.em.paper.explode(4, e.x, e.y, { size: [9, 15], aspect: [1.5, 3], speed: [50, 170], spin: [-420, 420], life: [0.8, 1.3], gravity: 700 });
+        this.em.smoke.explode(2, e.x, e.y, { jitter: 6, size: [10, 16], sizeEnd: 2, alpha: [0.22, 0], life: [0.3, 0.55], speed: [10, 30] });
         this.em.spark.explode(head ? 16 : 6, e.x, e.y);
-        if (head) this.ring(e.x, e.y, "232,220,190");
+        this.ring(e.x, e.y, "232,220,190", head ? 74 : 46, head ? 380 : 260);
+        this.float(e.zone, e.x, e.y - 16);
         if (e.best) {
           // A new personal best: a gold ring that outlives the hit, more
           // sparks, a warm flash and the lamp jolting on its arm.
@@ -470,9 +504,23 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
     }
     // A bright pop at the point of impact. Real time, so it reads through hit-stop.
     impact(x, y, k = 1) {
-      const fl = { x, y, r: 36 * k, a: 1 };
+      const fl = { x, y, r: 36 * k, a: 1, rot: this.rng() * TAU };
       this.flashes.push(fl);
       this.tweens.add({ target: fl, to: { r: 70 * k, a: 0 }, duration: 110, ease: "quadOut", realtime: true, onComplete: () => { this.flashes = this.flashes.filter(q => q !== fl); } });
+    }
+
+    // A streak from the muzzle to the impact for a few frames: it ties the
+    // pistol at the bottom of the screen to the hole that just appeared.
+    trace(x, y) {
+      this.tracer.x = x; this.tracer.y = y; this.tracer.a = 1;
+      this.tweens.kill("tracer");
+      this.tweens.add({ from: 1, to: 0, duration: 60, ease: "quadOut", realtime: true, tag: "tracer", onUpdate: (v) => { this.tracer.a = v; } });
+    }
+    float(zone, x, y) {
+      const f = { x, y, a: 1, s: 0.6, sprite: this.sp.plus[zone] };
+      this.floats.push(f);
+      this.tweens.add({ target: f, to: { y: y - 54, s: 1 }, duration: 640, ease: "cubicOut", realtime: true });
+      this.tweens.add({ target: f, to: { a: 0 }, duration: 640, ease: "quadIn", realtime: true, onComplete: () => { this.floats = this.floats.filter(q => q !== f); } });
     }
 
     onOpponentShot() {
@@ -505,6 +553,10 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
         if (c.faceOverride !== null) c.face = c.faceOverride;
         else if (exposed) c.face = sim.turn;
         else c.face = Math.max(0, c.face - dtGame * awayRate);
+
+        // A mover: while the card is exposed the view follows the Sim's live x.
+        if (c.kind === "target" && exposed && sim.target) c.x = sim.target.x;
+        for (const h of c.holes) h.age += dtGame;
 
         // Hanging-card physics: a light spring on rotation and a squash
         // that recovers, so a hit visibly rocks the card on its clip.
@@ -545,7 +597,10 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       for (const m of sim.wallMarks) S.draw(ctx, sp.mark, m.x, m.y, 18, 18);
 
       // Cards, far to near.
-      const cards = this.cards.slice().sort((a, b) => b.d - a.d);
+      const cards = this.order;
+      cards.length = 0;
+      for (const c of this.cards) cards.push(c);
+      cards.sort(this.byDepth);
       for (const c of cards) this.drawCardView(ctx, c, T);
 
       this.em.smoke.draw(ctx);
@@ -565,24 +620,42 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       if (this.oppFlash > 0) L.cut(LOOK.opp.x, LOOK.opp.y, 300 * this.oppFlash + 40, 260 * this.oppFlash + 40, this.oppFlash * 0.85);
       L.end(ctx);
 
-      /* Additive light. */
-      ctx.globalCompositeOperation = "lighter";
+      /* Additive light: the big soft glows go through the half-resolution
+         glow layer and land on the world as one blit. */
+      const G = this.glow, gc = G.ctx;
+      G.begin();
       for (const c of cards) {
         if (c.lamp <= 0.01) continue;
         const lp = this.lampPos(c);
         const R = lerp(LOOK.poolRadius[0], LOOK.poolRadius[1], c.d);
-        S.draw(ctx, sp.pool, c.x, c.y - 20 * c.s, R * 2.1, R * 2.4, 0.42 * c.lamp * c.flick);
-        S.draw(ctx, sp.lampCore, lp.x, lp.y + 14 * c.s, 70 * c.s, 70 * c.s, c.lamp * c.flick);
+        S.draw(gc, sp.pool, c.x, c.y - 20 * c.s, R * 2.1, R * 2.4, 0.42 * c.lamp * c.flick);
+        S.draw(gc, sp.lampCore, lp.x, lp.y + 14 * c.s, 70 * c.s, 70 * c.s, c.lamp * c.flick);
+        G.used = true;
       }
-      if (this.signal.r > 0) S.draw(ctx, sp.red, LOOK.signal.x, LOOK.signal.y, 260, 260, 0.5 * this.signal.r);
-      if (this.signal.g > 0) S.draw(ctx, sp.green, LOOK.signal.x, LOOK.signal.y, 270, 270, 0.55 * this.signal.g);
+      if (this.signal.r > 0) { S.draw(gc, sp.red, LOOK.signal.x, LOOK.signal.y, 260, 260, 0.5 * this.signal.r); G.used = true; }
+      if (this.signal.g > 0) { S.draw(gc, sp.green, LOOK.signal.x, LOOK.signal.y, 270, 270, 0.55 * this.signal.g); G.used = true; }
       if (this.muzzleA > 0) {
         const mx = this.gunGeo.muzzle[0], my = this.gunGeo.muzzle[1], a = this.muzzleA;
-        S.draw(ctx, sp.muzzle, mx, my, 360 * (0.7 + 0.3 * a), 340 * (0.7 + 0.3 * a), a);
-        S.draw(ctx, sp.muzzle, mx, my - 6, 150, 150, a * 0.9);
+        S.draw(gc, sp.muzzle, mx, my, 360 * (0.7 + 0.3 * a), 340 * (0.7 + 0.3 * a), a);
+        S.draw(gc, sp.muzzle, mx, my - 6, 150, 150, a * 0.9);
+        G.used = true;
       }
-      for (const fl of this.flashes) S.draw(ctx, sp.impact, fl.x, fl.y, fl.r, fl.r, fl.a);
-      if (this.oppFlash > 0) S.draw(ctx, sp.opp, LOOK.opp.x, LOOK.opp.y, 540, 540, this.oppFlash);
+      if (this.oppFlash > 0) { S.draw(gc, sp.opp, LOOK.opp.x, LOOK.opp.y, 540, 540, this.oppFlash); G.used = true; }
+      G.end(ctx);
+
+      /* Small, sharp additive details stay at full resolution. */
+      ctx.globalCompositeOperation = "lighter";
+      if (this.tracer.a > 0) {
+        const m = this.gunGeo.muzzle, tr = this.tracer;
+        ctx.strokeStyle = `rgba(255,236,190,${0.3 * tr.a})`; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(m[0], m[1]); ctx.lineTo(tr.x, tr.y); ctx.stroke();
+        ctx.strokeStyle = `rgba(255,255,255,${0.45 * tr.a})`; ctx.lineWidth = 1;
+        ctx.beginPath(); ctx.moveTo(m[0], m[1]); ctx.lineTo(tr.x, tr.y); ctx.stroke();
+      }
+      for (const fl of this.flashes) {
+        S.draw(ctx, sp.impact, fl.x, fl.y, fl.r, fl.r, fl.a);
+        S.draw(ctx, sp.star, fl.x, fl.y, fl.r * 1.9, fl.r * 1.9, fl.a, fl.rot);
+      }
       for (const r of this.rings) {
         ctx.globalAlpha = r.a; ctx.strokeStyle = `rgba(${r.rgb},1)`; ctx.lineWidth = 3 * (1 - r.a) + 1.5;
         ctx.beginPath(); ctx.arc(r.x, r.y, r.r, 0, TAU); ctx.stroke();
@@ -591,6 +664,7 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       this.em.spark.draw(ctx);
       this.em.dust.draw(ctx);
       ctx.globalCompositeOperation = "source-over";
+      for (const f of this.floats) S.draw(ctx, f.sprite, f.x, f.y, 80 * f.s, 44 * f.s, f.a);
 
       /* Signal lamp housing at the firing line (drawn after lighting so it is always legible). */
       this.drawSignalHousing(ctx);
@@ -603,11 +677,8 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       ctx.drawImage(sp.vignette.canvas, 0, 0, W, H);
       if (this.grainOn) {
         const g = sp.grain[this.frame & 1];
-        ctx.globalAlpha = 0.045;
-        ctx.globalCompositeOperation = "overlay";
-        const ox = -(this.frame * 37 % 128), oy = -(this.frame * 53 % 128);
-        for (let y = oy; y < H; y += 128) for (let x = ox; x < W; x += 128) ctx.drawImage(g.canvas, x, y, 128, 128);
-        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 0.05;
+        ctx.drawImage(g.canvas, -(this.frame * 37 % 128), -(this.frame * 53 % 128), W + 128, H + 128);
         ctx.globalAlpha = 1;
       }
     }
@@ -646,8 +717,11 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
       ctx.drawImage((c.kind === "decoy" ? sp.decoy : sp.card).canvas, -T.cardW / 2, T.cardTop, T.cardW, T.cardH);
       for (const h of c.holes) {
         const hs = sp.holes[h.v];
+        // A fresh hole punches in oversize and settles over ~120 ms; on the
+        // game clock, so hit-stop holds it at its biggest.
+        const k = Math.min(1, h.age / 0.12), sz = 20 * (1 + 0.8 * (1 - k) * (1 - k));
         ctx.save(); ctx.translate(h.lx, h.ly); ctx.rotate(h.rot);
-        ctx.drawImage(hs.canvas, -10, -10, 20, 20);
+        ctx.drawImage(hs.canvas, -sz / 2, -sz / 2, sz, sz);
         ctx.restore();
       }
       // Hanger clip.

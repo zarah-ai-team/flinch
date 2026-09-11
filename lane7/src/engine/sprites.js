@@ -117,6 +117,42 @@ var L7 = (typeof globalThis.L7 === "object") ? globalThis.L7 : (globalThis.L7 = 
     }
   }
 
+  // Additive light at half resolution. Every warm pool, lamp core, signal
+  // glow and muzzle flash is soft, so drawing them at half the pixels is
+  // invisible — and it turns several full-screen additive blits (the
+  // fill-rate cost that makes phones drop frames) into one.
+  class GlowLayer {
+    constructor(w, h) {
+      this.w = w; this.h = h;
+      this.canvas = document.createElement("canvas");
+      this.ctx = this.canvas.getContext("2d");
+      this.scale = 1;
+      this.used = false;
+    }
+    resize(scale) {
+      this.scale = Math.max(0.5, scale * 0.5);
+      this.canvas.width = Math.ceil(this.w * this.scale);
+      this.canvas.height = Math.ceil(this.h * this.scale);
+    }
+    begin() {
+      const g = this.ctx;
+      g.setTransform(this.scale, 0, 0, this.scale, 0, 0);
+      g.globalCompositeOperation = "source-over";
+      g.globalAlpha = 1;
+      g.clearRect(0, 0, this.w, this.h);
+      g.globalCompositeOperation = "lighter";
+      this.used = false;
+    }
+    end(ctx) {
+      if (!this.used) return;
+      ctx.globalCompositeOperation = "lighter";
+      ctx.globalAlpha = 1;
+      ctx.drawImage(this.canvas, 0, 0, this.w, this.h);
+      ctx.globalCompositeOperation = "source-over";
+    }
+  }
+
   L7.Sprites = Sprites;
   L7.LightLayer = LightLayer;
+  L7.GlowLayer = GlowLayer;
 })();

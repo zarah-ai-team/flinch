@@ -100,6 +100,19 @@ L7.Sound = {
     this.burst(0.03, "highpass", 1800, 3000, 0.16, pan, sec - 0.02);
   },
 
+  // A mover's carrier while the card is exposed: the same motor, quieter,
+  // no clack — it hasn't stopped.
+  mover(sec, pan) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    this.burst(sec, "bandpass", 360, 300, 0.05, pan, 0, 3);
+    const o = this.ctx.createOscillator(), g = this.ctx.createGain();
+    o.type = "sawtooth"; o.frequency.setValueAtTime(52, t);
+    g.gain.setValueAtTime(0.0001, t); g.gain.linearRampToValueAtTime(0.03, t + 0.1);
+    g.gain.setValueAtTime(0.03, t + Math.max(0.12, sec - 0.15)); g.gain.exponentialRampToValueAtTime(0.0001, t + sec);
+    o.connect(g); g.connect(this.out(pan)); o.start(t); o.stop(t + sec + 0.02);
+  },
+
   ready()    { this.burst(0.02, "highpass", 2500, 4000, 0.12); this.tone(520, 0.05, "square", 0.06); },
 
   // The go signal is a real range buzzer: two rough voices a fifth

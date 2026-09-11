@@ -16,18 +16,19 @@ let failures = 0, checks = 0;
 function ok(cond, msg) { checks++; if (!cond) { failures++; console.log("  FAIL:", msg); } }
 
 const STEP = 1 / 60, FRAME = 1000 / 60;
-const decoyStats = { want: 0, got: 0 };
+const decoyStats = { want: 0, got: 0, byLevel: {} };
 
 // Plays one level. `reactMs` is the player's reaction to the go signal,
 // `headRate` how often they gamble on the head, `aimJitter` px of hand shake.
 function playLevel(level, { reactMs, headRate = 0.4, aimJitter = 6, seed = 1234, falseStartRate = 0, skipBanners = true }) {
   const sim = new Sim(CONFIG, { rng: mulberry32(seed) });
   const prng = mulberry32(seed ^ 0x9e3779b9);
-  let now = 100000, tapAt = -1, tapAtPoint = null, result = null, frames = 0;
+  let now = 100000, tapAt = -1, aim = null, result = null, frames = 0;
   const events = [];
   const positions = [];
   sim.on("round:begin", (e) => {
-    positions.push({ target: e.target, decoys: e.decoys });
+    // Snapshot: the target object is live and a mover will slide it later.
+    positions.push({ target: { x: e.target.x, d: e.target.d }, decoys: e.decoys });
     // Geometry checks on every placement.
     const T = CONFIG.target;
     const cards = [e.target, ...e.decoys];
@@ -43,15 +44,13 @@ function playLevel(level, { reactMs, headRate = 0.4, aimJitter = 6, seed = 1234,
     }
     ok(e.decoys.length <= CONFIG.levels[level - 1].decoys, `L${level} never more decoys than configured`);
     decoyStats.want += CONFIG.levels[level - 1].decoys; decoyStats.got += e.decoys.length;
+    const bl = decoyStats.byLevel[level] || (decoyStats.byLevel[level] = { want: 0, got: 0 });
+    bl.want += CONFIG.levels[level - 1].decoys; bl.got += e.decoys.length;
   });
   sim.on("go", (e) => {
     ok(e.oppReactMs >= CONFIG.opponentFloorMs, `L${level} opponent never faster than the floor (${e.oppReactMs})`);
     const t = sim.target;
-    const head = prng() < headRate;
-    const jx = (prng() * 2 - 1) * aimJitter, jy = (prng() * 2 - 1) * aimJitter;
-    tapAtPoint = head
-      ? { x: t.x + jx, y: t.y + CONFIG.target.headY * t.s + jy }
-      : { x: t.x + jx, y: t.y + 30 * t.s + jy };
+    aim = { head: prng() < headRate, jx: (prng() * 2 - 1) * aimJitter, jy: (prng() * 2 - 1) * aimJitter };
     tapAt = now + reactMs + (prng() * 2 - 1) * 40;
   });
   sim.on("hold", () => {
@@ -64,7 +63,9 @@ function playLevel(level, { reactMs, headRate = 0.4, aimJitter = 6, seed = 1234,
   while (!result && frames < 60 * 240) {
     now += FRAME; frames++;
     if (tapAt >= 0 && now >= tapAt) {
-      const pt = tapAtPoint || { x: 270, y: 480 };
+      // Aim at the card where it is now: a mover has slid since the buzzer.
+      const t = sim.target;
+      const pt = aim ? { x: t.x + aim.jx, y: t.y + (aim.head ? CONFIG.target.headY : 30) * t.s + aim.jy } : { x: 270, y: 480 };
       sim.fire(pt.x, pt.y, tapAt);
       tapAt = -1;
     }
@@ -96,23 +97,24 @@ function winRate(level, opts, runs = 30) {
   return wins / runs;
 }
 const fast = [1, 5, 10].map(l => winRate(l, { reactMs: 380, headRate: 0.5, aimJitter: 4 }));
-const mid  = [1, 5, 10].map(l => winRate(l, { reactMs: 620, headRate: 0.4 }));
-const slow = [1, 5, 10].map(l => winRate(l, { reactMs: 950, headRate: 0.3 }));
+const mid  = [1, 5, 10].map(l => winRate(l, { reactMs: 560, headRate: 0.4 }));
+const slow = [1, 5, 10].map(l => winRate(l, { reactMs: 800, headRate: 0.3 }));
 console.log("  win rates  L1 / L5 / L10");
 console.log("   380ms:", fast.map(x => x.toFixed(2)).join(" / "));
-console.log("   620ms:", mid.map(x => x.toFixed(2)).join(" / "));
-console.log("   950ms:", slow.map(x => x.toFixed(2)).join(" / "));
+console.log("   560ms:", mid.map(x => x.toFixed(2)).join(" / "));
+console.log("   800ms:", slow.map(x => x.toFixed(2)).join(" / "));
 ok(fast[0] > 0.9, "a fast player clears level 1");
-ok(fast[2] > 0.5, "a fast head-taker can beat level 10");
-ok(mid[0] > 0.8, "a 620ms player clears level 1");
-ok(mid[2] < 0.35, "a 620ms player struggles at level 10");
-ok(slow[0] > 0.6, "a 950ms player can still take level 1");
-ok(slow[2] < 0.05, "a 950ms player cannot beat level 10");
+ok(fast[2] > 0.5, "a 380ms head-taker can beat level 10");
+ok(mid[0] > 0.9, "a 560ms player clears level 1");
+ok(mid[1] > 0.5, "a 560ms player can take level 5");
+ok(mid[2] < 0.1, "a 560ms player cannot beat level 10");
+ok(slow[0] > 0.5, "an 800ms player can still take level 1");
+ok(slow[1] < 0.1 && slow[2] === 0, "an 800ms player is stopped by level 5 and never sees level 10");
 ok(slow[1] < mid[1] && mid[2] <= mid[0], "difficulty is monotone in the obvious directions");
 
 /* ---- 3. Scoring arithmetic ---- */
 {
-  const { sim, result } = playLevel(1, { reactMs: 500, headRate: 0, aimJitter: 0, seed: 5 });
+  const { sim, result } = playLevel(1, { reactMs: 450, headRate: 0, aimJitter: 0, seed: 5 });
   ok(sim.youScore === 15 && sim.oppScore === 0 && result.won, "always-body vs a slow Lane 8 wins outright at level 1");
   // Lane 8 only scores when you fail, so with 5 rounds a draw is
   // arithmetically impossible (5h + 3b = 3(5 - h - b) has no integer
@@ -127,7 +129,7 @@ ok(slow[1] < mid[1] && mid[2] <= mid[0], "difficulty is monotone in the obvious 
 
 /* ---- 3b. Difficulty curve table (for tuning, printed not asserted) ---- */
 {
-  const speeds = [450, 520, 600, 680, 780, 900];
+  const speeds = [400, 450, 500, 560, 640, 740];
   console.log("  win rate by level (rows: player reaction ms, 40% head gambles)");
   console.log("        " + CONFIG.levels.map((_, i) => String(i + 1).padStart(4)).join(""));
   for (const ms of speeds) {
@@ -248,6 +250,56 @@ ok(slow[1] < mid[1] && mid[2] <= mid[0], "difficulty is monotone in the obvious 
   ok(endMode === "ladder", "level:end carries the mode");
 }
 
+/* ---- 10b. Movers: the card slides while exposed, bounces, and is hit where it is ---- */
+{
+  const lv = CONFIG.levels.findIndex(P => P.drift > 0) + 1;
+  ok(lv > 0 && CONFIG.levels[0].drift === 0, `movers start at level ${lv}, never level 1`);
+  const sim = new Sim(CONFIG, { rng: mulberry32(31) });
+  sim.startLevel(lv);
+  let now = 0;
+  while (sim.state !== "FIRE") { now += FRAME; sim.step(STEP, now); }
+  const x0 = sim.target.x, v = sim.driftV;
+  ok(Math.abs(v) === CONFIG.levels[lv - 1].drift, "drift speed comes from the level table");
+  for (let i = 0; i < 12; i++) { now += FRAME; sim.step(STEP, now); }
+  ok(Math.abs(sim.target.x - x0) > 5, `the card has moved while exposed (${(sim.target.x - x0).toFixed(1)} px)`);
+  ok(sim.target.x >= sim.driftMin && sim.target.x <= sim.driftMax, "the mover stays inside the lane");
+  const t = sim.target;
+  ok(sim.hitTest(t.x, t.y + 30 * t.s).zone === "body", "a shot at the moved position hits");
+  ok(sim.hitTest(x0 - Math.sign(v) * 60, t.y + 30 * t.s).zone !== "body" || Math.abs(v) < 40, "a shot where the card was is no longer a body");
+  // Bounce: run a long exposure with a huge drift and confirm it never leaves the lane.
+  const fast = new Sim(CONFIG, { rng: mulberry32(32) });
+  fast.startLevel(lv);
+  now = 0; while (fast.state !== "FIRE") { now += FRAME; fast.step(STEP, now); }
+  fast.driftV = 2000;                                  // far faster than any level, to force the bounce
+  let inside = true, flips = 0, lastV = fast.driftV;
+  for (let i = 0; i < 40 && fast.state === "FIRE"; i++) {
+    fast.step(STEP, fast.greenAt + i);   // keep the real clock still so Lane 8 never fires
+    if (fast.target.x < fast.driftMin - 0.01 || fast.target.x > fast.driftMax + 0.01) inside = false;
+    if (fast.driftV !== lastV) { flips++; lastV = fast.driftV; }
+  }
+  ok(inside && flips >= 1, `a fast mover bounces off the lane edges (${flips} reversals)`);
+  // Static levels never move.
+  const still = new Sim(CONFIG, { rng: mulberry32(33) });
+  still.startLevel(1);
+  now = 0; while (still.state !== "FIRE") { now += FRAME; still.step(STEP, now); }
+  const sx = still.target.x;
+  for (let i = 0; i < 12; i++) { now += FRAME; still.step(STEP, now); }
+  ok(still.target.x === sx && still.driftV === 0, "level 1 is static");
+  // Decoys respect the sweep: at the top level, no decoy covers the target's head anywhere on its path.
+  let checked = 0;
+  for (let seed = 1; seed <= 40; seed++) {
+    const s = new Sim(CONFIG, { rng: mulberry32(400 + seed) });
+    s.startLevel(CONFIG.levels.length);
+    const top = CONFIG.levels[CONFIG.levels.length - 1];
+    const exposure = Math.min(CONFIG.driftSweepSec, (top.opp[0] + CONFIG.opponentJitterMs) / 1000);
+    for (let k = 0; k <= 8; k++) {
+      const at = Object.assign({}, s.target, { x: s.driftAt(s.target.x, s.driftV, exposure * k / 8) });
+      for (const d of s.decoys) { checked++; ok(s.separated(d, at), "decoy clear of the mover's whole path"); }
+    }
+  }
+  ok(checked > 40, `sweep separation exercised (${checked} checks)`);
+}
+
 /* ---- 11. Daily challenge arithmetic and determinism ---- */
 {
   const now = Date.UTC(2026, 8, 11, 13, 30);                    // 11 Sep 2026, 13:30 UTC
@@ -306,8 +358,9 @@ ok(slow[1] < mid[1] && mid[2] <= mid[0], "difficulty is monotone in the obvious 
   ok(s.dailyStreak === 0 && s.daily.won === false && s.dailyPlayed === 4 && s.dailyWon === 3, "a daily loss ends the streak and is recorded");
 }
 
-ok(decoyStats.got / decoyStats.want >= 0.97, `decoys placed ${(100 * decoyStats.got / decoyStats.want).toFixed(1)}% of the time (want ≥ 97%)`);
-console.log(`  decoy placement success: ${(100 * decoyStats.got / decoyStats.want).toFixed(1)}%`);
+ok(decoyStats.got / decoyStats.want >= 0.9, `decoys placed ${(100 * decoyStats.got / decoyStats.want).toFixed(1)}% of the time (want ≥ 90%)`);
+console.log(`  decoy placement success: ${(100 * decoyStats.got / decoyStats.want).toFixed(1)}%  by level: ` +
+  Object.keys(decoyStats.byLevel).filter(l => decoyStats.byLevel[l].want).map(l => `L${l} ${Math.round(100 * decoyStats.byLevel[l].got / decoyStats.byLevel[l].want)}%`).join(" "));
 
 console.log(`\n${checks - failures}/${checks} checks passed`);
 process.exit(failures ? 1 : 0);

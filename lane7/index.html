@@ -82,6 +82,8 @@
   }
 
   #game { display: block; width: 100%; height: 100%; }
+  /* Full-bleed on phones: the big soft shadow is never visible there. */
+  @media (max-width: 600px) { #stage { box-shadow: none; } }
 
   button {
     font: inherit; color: inherit; background: none; border: 0; cursor: pointer;
@@ -200,9 +202,9 @@
   #overlay {
     position: absolute; inset: 0;
     display: grid; place-items: center;
-    background: linear-gradient(rgba(6,10,11,.82), rgba(6,10,11,.5) 45%, rgba(6,10,11,.82));
-    backdrop-filter: blur(2px);
-    -webkit-backdrop-filter: blur(2px);
+    /* No backdrop-filter: blurring a canvas that repaints every frame is
+       the single most expensive thing a phone can be asked to do. */
+    background: linear-gradient(rgba(6,10,11,.88), rgba(6,10,11,.62) 45%, rgba(6,10,11,.88));
     padding: 24px 24px 48px;
     text-align: center;
     opacity: 0; transition: opacity .35s;
