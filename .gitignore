@@ -1,0 +1,6 @@
+node_modules/
+lane7/test/shots/
+dist/
+*.zip
+.DS_Store
+Thumbs.db

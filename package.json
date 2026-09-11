@@ -1,0 +1,18 @@
+{
+  "name": "flinch",
+  "version": "2.1.0",
+  "private": true,
+  "description": "Flinch — a reaction duel on a shooting range. Browser, portrait, no build step.",
+  "scripts": {
+    "test": "node lane7/test/sim.test.js",
+    "test:browser": "node lane7/test/browser.test.js",
+    "serve": "npx --yes serve lane7 -l 8080",
+    "icons": "node tools/make-icons.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.56.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

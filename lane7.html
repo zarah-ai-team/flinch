@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Lane 7</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700&family=Barlow:wght@400;600&display=swap" rel="stylesheet">
+<style>
+  /* ------------------------------------------------------------------
+     Palette: an indoor range at night. Cold gloom downrange, one warm
+     lamp over the target, and the red/green lane light that real ranges
+     use to mean "hold" and "range is hot". The signal in the fiction is
+     the same signal in the mechanic — that's why it reads instantly.
+     ------------------------------------------------------------------ */
+  :root {
+    --gloom:  #141b1c;
+    --lane:   #1b2426;
+    --wall:   #263133;
+    --paper:  #d8c9a8;
+    --ink:    #14100e;
+    --hot:    #c4483a;
+    --clear:  #6e9e62;
+    --lamp:   #e8c77a;
+    --chalk:  #b9c4c0;
+    --dim:    #6d7c7a;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  html, body {
+    height: 100%;
+    background: var(--gloom);
+    color: var(--chalk);
+    font-family: "Barlow", system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    overscroll-behavior: none;
+  }
+
+  body {
+    display: grid;
+    place-items: center;
+    /* Stop the browser hijacking taps as scroll/zoom gestures. Without
+       this, iOS Safari eats ~300ms on every tap and the reaction timing
+       becomes meaningless. */
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  #stage {
+    position: relative;
+    width: min(100vw, calc(100vh * 0.5625));
+    width: min(100vw, calc(100dvh * 0.5625));
+    aspect-ratio: 540 / 960;
+    max-height: 100dvh;
+    background: var(--lane);
+    overflow: hidden;
+    box-shadow: 0 0 0 1px #0a0e0f, 0 24px 60px rgba(0,0,0,.55);
+    cursor: crosshair;
+  }
+
+  #game { display: block; width: 100%; height: 100%; }
+
+  /* ---------- Scoreboard ---------- */
+  #hud {
+    position: absolute; inset: 0 0 auto 0;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 12px;
+    padding: 18px 20px 0;
+    pointer-events: none;
+  }
+  .side { display: flex; flex-direction: column; gap: 1px; }
+  .side.opp { text-align: right; }
+  .label { font-size: 12px; letter-spacing: .03em; color: var(--dim); }
+  .score {
+    font-family: "Barlow Condensed", "Barlow", sans-serif;
+    font-weight: 700; font-size: 42px; line-height: .9;
+    font-variant-numeric: tabular-nums;
+    color: var(--chalk);
+  }
+  .side.opp .score { color: #93a3a0; }
+  /* Opponent fires: their whole block kicks red for a beat. */
+  .side.opp.fired .score { color: var(--hot); }
+
+  .pips { display: flex; gap: 6px; }
+  .pips i {
+    width: 16px; height: 5px;
+    background: #33403f;
+    display: block;
+  }
+  .pips i.won  { background: var(--clear); }
+  .pips i.lost { background: var(--hot); }
+
+  /* ---------- Lane signal ---------- */
+  #signal {
+    position: absolute; inset: auto 0 0 0;
+    display: flex; flex-direction: column; align-items: center; gap: 6px;
+    padding: 0 20px 26px;
+    pointer-events: none;
+  }
+  #lamp {
+    width: 13px; height: 13px; border-radius: 50%;
+    background: #3a2422;
+    transition: background .06s linear, box-shadow .06s linear;
+  }
+  #lamp.hold  { background: var(--hot);   box-shadow: 0 0 16px 3px rgba(196,72,58,.5); }
+  #lamp.clear { background: var(--clear); box-shadow: 0 0 22px 5px rgba(110,158,98,.55); }
+
+  #status {
+    font-family: "Barlow Condensed", "Barlow", sans-serif;
+    font-weight: 500; font-size: 21px; letter-spacing: .02em;
+    color: var(--chalk);
+  }
+  #sub {
+    font-size: 12px; color: var(--dim);
+    font-variant-numeric: tabular-nums;
+    min-height: 15px;
+  }
+
+  /* ---------- Round banner + end card ---------- */
+  #banner {
+    position: absolute; left: 0; right: 0; top: 68%;
+    text-align: center;
+    pointer-events: none;
+    opacity: 0;
+  }
+  #banner.show { opacity: 1; }
+  #banner .verdict {
+    font-family: "Barlow Condensed", "Barlow", sans-serif;
+    font-weight: 700; font-size: 30px; letter-spacing: .01em;
+  }
+  #banner .detail { font-size: 13px; color: var(--dim); font-variant-numeric: tabular-nums; }
+  #banner.good .verdict { color: var(--paper); }
+  #banner.bad  .verdict { color: var(--hot); }
+
+  #overlay {
+    position: absolute; inset: 0;
+    display: grid; place-items: center;
+    background: rgba(15,20,21,.82);
+    backdrop-filter: blur(3px);
+    padding: 24px;
+    text-align: center;
+  }
+  #overlay[hidden] { display: none; }
+  #overlay h1 {
+    font-family: "Barlow Condensed", "Barlow", sans-serif;
+    font-weight: 700; font-size: 46px; line-height: .95;
+    letter-spacing: .01em; color: var(--paper);
+  }
+  #overlay p { font-size: 14px; color: var(--chalk); max-width: 30ch; margin: 14px auto 0; line-height: 1.55; }
+  #overlay .rules { color: var(--dim); font-size: 13px; margin-top: 18px; }
+  #overlay .cue {
+    margin-top: 26px; font-size: 13px; color: var(--clear);
+    font-family: "Barlow Condensed", "Barlow", sans-serif;
+    font-size: 17px; letter-spacing: .04em;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    #lamp { transition: none; }
+  }
+</style>
+</head>
+<body>
+
+<div id="stage">
+  <canvas id="game"></canvas>
+
+  <header id="hud">
+    <div class="side you">
+      <span class="label">You</span>
+      <span class="score" id="youScore">0</span>
+    </div>
+    <div class="pips" id="pips"><i></i><i></i><i></i></div>
+    <div class="side opp" id="oppSide">
+      <span class="label">Lane 8</span>
+      <span class="score" id="oppScore">0</span>
+    </div>
+  </header>
+
+  <div id="banner">
+    <div class="verdict" id="verdict"></div>
+    <div class="detail" id="detail"></div>
+  </div>
+
+  <div id="signal">
+    <div id="lamp"></div>
+    <p id="status">Tap to begin</p>
+    <p id="sub"></p>
+  </div>
+
+  <div id="overlay">
+    <div>
+      <h1 id="title">Lane 7</h1>
+      <p id="blurb">Wait for the green light. One shot per round, three rounds.</p>
+      <p class="rules">Head 5 &middot; Body 3 &middot; Miss 0<br>Lane 8 takes the body every time for 3.</p>
+      <p class="cue" id="cue">Tap anywhere to start</p>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+
+/* ===================================================================
+   LANE 7 — core loop prototype
+   ===================================================================
+   Structure, top to bottom:
+     CONFIG   every tunable number, in one place
+     rng      seeded randomness, so a run can be replayed exactly
+     Store    versioned save with a migration ladder
+     Sound    procedural audio, no asset files
+     Input    raw pointer events translated into one game action
+     Sim      fixed-timestep state machine — the actual rules
+     Render   draws whatever Sim currently says is true
+     Loop     accumulator that keeps Sim at a steady 60Hz
+
+   The separation is the point. Sim never touches the canvas, Render
+   never changes game state, and Input never does either — it only
+   reports "the player fired at (x, y)". You can swap the renderer for
+   Godot later and the rules come across unchanged.
+   =================================================================== */
+
+/* ---------- CONFIG ---------------------------------------------------
+   Every number you'd want to tune lives here. Nothing below this block
+   should contain a magic number. When we move to Godot this becomes a
+   JSON resource and a designer can retune the game without code.
+   ------------------------------------------------------------------ */
+const CONFIG = {
+  rounds: 3,
+  points: { head: 5, body: 3, miss: 0 },
+  opponentPoints: 3,
+
+  holdMs: [1200, 3000],        // random wait before the light turns green
+  turnMs: 110,                 // how long the target takes to rotate face-on
+  opponentReactMs: [980, 820, 690],
+  opponentJitterMs: 90,
+
+  bannerMs: 1600,
+
+  // Target geometry, in design space (540 x 960). Head radius 32 works
+  // out to ~45px across on a 390pt iPhone — just above Apple's 44pt
+  // minimum touch target, so it's demanding but never unfair.
+  target: { x: 270, y: 430, headR: 32, headY: -100 },
+
+  shake: { head: 14, body: 9, miss: 5, decay: 7 },
+  slowMo: { scale: 0.3, ms: 300 },
+
+  maxHoles: 10,
+  maxParticles: 140,
+
+  seed: 20260910
+};
+
+const W = 540, H = 960;               // design resolution, portrait phone
+const TAU = Math.PI * 2;
+const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+/* ---------- Seeded randomness ---------------------------------------
+   Math.random() can't be replayed. mulberry32 can: same seed, same
+   sequence, every time. That matters the moment you want replays,
+   daily challenges, or a bug report you can actually reproduce.
+   ------------------------------------------------------------------ */
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+let rand = mulberry32(CONFIG.seed);
+const randRange = (lo, hi) => lo + rand() * (hi - lo);
+
+/* ---------- Save ----------------------------------------------------
+   Versioned from day one. Adding a field later is painless; retrofitting
+   versioning onto a save format players already have on disk is not.
+   ------------------------------------------------------------------ */
+const SAVE_VERSION = 1;
+const SAVE_KEY = "lane7:save";
+
+const memoryStore = {};
+const Store = {
+  async get(key) {
+    try { if (window.storage) { const r = await window.storage.get(key); return r ? r.value : null; } }
+    catch (_) { /* key absent or storage unavailable — fall through */ }
+    return memoryStore[key] ?? null;
+  },
+  async set(key, value) {
+    try { if (window.storage) { await window.storage.set(key, value); return; } }
+    catch (_) { /* fall through */ }
+    memoryStore[key] = value;
+  }
+};
+
+let save = { version: SAVE_VERSION, bestReactMs: null, matchesWon: 0, matchesPlayed: 0 };
+
+function migrate(data) {
+  // Each future version adds one case and falls through to the next.
+  // switch (data.version) {
+  //   case 1: data.someNewField = 0; data.version = 2;  // fallthrough
+  // }
+  return data;
+}
+
+async function loadSave() {
+  const raw = await Store.get(SAVE_KEY);
+  if (!raw) return;
+  try {
+    const parsed = migrate(JSON.parse(raw));
+    if (parsed.version === SAVE_VERSION) save = parsed;
+  } catch (_) { /* corrupt save — keep defaults rather than crash */ }
+}
+function persist() { Store.set(SAVE_KEY, JSON.stringify(save)); }
+
+/* ---------- Sound ---------------------------------------------------
+   All generated at runtime — no .wav files, nothing to license, nothing
+   to download. Placeholder audio that already feels right is worth more
+   than good audio you commissioned for a mechanic that turned out dull.
+
+   Mobile browsers refuse to start an AudioContext without a user
+   gesture, so unlock() runs on the first tap. Forgetting this is the
+   single most common "why is my web game silent on iPhone" bug.
+   ------------------------------------------------------------------ */
+const Sound = {
+  ctx: null, master: null, noise: null,
+
+  unlock() {
+    if (!this.ctx) {
+      const AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      this.ctx = new AC();
+      this.master = this.ctx.createGain();
+      this.master.gain.value = 0.85;
+      this.master.connect(this.ctx.destination);
+
+      // One second of white noise, reused by every noise-based cue.
+      const len = this.ctx.sampleRate;
+      this.noise = this.ctx.createBuffer(1, len, this.ctx.sampleRate);
+      const d = this.noise.getChannelData(0);
+      for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    }
+    if (this.ctx.state === "suspended") this.ctx.resume();
+  },
+
+  out(pan) {
+    if (pan === undefined || !this.ctx.createStereoPanner) return this.master;
+    const p = this.ctx.createStereoPanner();
+    p.pan.value = pan;
+    p.connect(this.master);
+    return p;
+  },
+
+  tone(freq, dur, type, vol, pan, slideTo) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const o = this.ctx.createOscillator();
+    const g = this.ctx.createGain();
+    o.type = type || "sine";
+    o.frequency.setValueAtTime(freq, t);
+    if (slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(vol, t + 0.006);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(this.out(pan));
+    o.start(t); o.stop(t + dur + 0.02);
+  },
+
+  burst(dur, filterType, from, to, vol, pan) {
+    if (!this.ctx) return;
+    const t = this.ctx.currentTime;
+    const s = this.ctx.createBufferSource();
+    s.buffer = this.noise;
+    const f = this.ctx.createBiquadFilter();
+    f.type = filterType;
+    f.frequency.setValueAtTime(from, t);
+    f.frequency.exponentialRampToValueAtTime(to, t + dur);
+    const g = this.ctx.createGain();
+    g.gain.setValueAtTime(vol, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    s.connect(f); f.connect(g); g.connect(this.out(pan));
+    s.start(t); s.stop(t + dur + 0.02);
+  },
+
+  // A gunshot is a crack (noise sweeping down) plus a thump (low sine).
+  // Layering two simple sources reads far better than one complex one.
+  shot(pan) {
+    this.burst(0.16, "lowpass", 7000, 380, 0.55, pan);
+    this.tone(130, 0.13, "sine", 0.5, pan, 46);
+  },
+  ready()    { this.tone(520, 0.06, "square", 0.10); },
+  go()       { this.tone(1180, 0.09, "square", 0.22); this.tone(880, 0.09, "square", 0.14); },
+  hitHead()  { this.tone(1500, 0.32, "sine", 0.3); this.tone(2260, 0.26, "sine", 0.16); },
+  hitBody()  { this.burst(0.11, "bandpass", 700, 320, 0.42); },
+  miss()     { this.burst(0.07, "highpass", 2400, 3600, 0.25); this.tone(620, 0.3, "sine", 0.16, 0, 190); },
+  buzz()     { this.tone(92, 0.38, "sawtooth", 0.26); this.tone(97, 0.38, "sawtooth", 0.2); },
+  win()      { [523, 659, 784].forEach((f, i) => setTimeout(() => this.tone(f, 0.22, "triangle", 0.24), i * 95)); },
+  lose()     { [392, 330, 247].forEach((f, i) => setTimeout(() => this.tone(f, 0.3, "triangle", 0.22), i * 120)); }
+};
+
+/* ---------- Target geometry -----------------------------------------
+   Local coordinates, origin at the target's centre. Built once as a
+   Path2D so hit-testing and drawing use the exact same shape — if they
+   ever drift apart you get the worst kind of bug, where what the player
+   sees and what the game checks disagree.
+   ------------------------------------------------------------------ */
+const BODY_PATH = new Path2D();
+BODY_PATH.moveTo(-20, -74);
+BODY_PATH.lineTo(20, -74);
+BODY_PATH.quadraticCurveTo(84, -62, 92, 4);
+BODY_PATH.lineTo(78, 126);
+BODY_PATH.lineTo(-78, 126);
+BODY_PATH.lineTo(-92, 4);
+BODY_PATH.quadraticCurveTo(-84, -62, -20, -74);
+BODY_PATH.closePath();
+
+const hitCanvas = document.createElement("canvas").getContext("2d");
+
+function zoneAt(px, py) {
+  const t = CONFIG.target;
+  // While the target is edge-on, its apparent width is squeezed by
+  // `turn`. Undoing that here means a very fast player shooting mid-turn
+  // is genuinely aiming at a narrower target — which is honest, and
+  // rewards speed with real difficulty rather than a free hit.
+  if (sim.turn < 0.25) return "miss";
+  const lx = (px - t.x) / sim.turn;
+  const ly = py - t.y;
+
+  const dx = lx, dy = ly - t.headY;
+  if (dx * dx + dy * dy <= t.headR * t.headR) return "head";
+  if (hitCanvas.isPointInPath(BODY_PATH, lx, ly)) return "body";
+  return "miss";
+}
+
+/* ---------- Particle pool -------------------------------------------
+   Preallocated and reused. Allocating objects every frame is what makes
+   a phone game hitch: the garbage collector eventually has to run, and
+   it runs during your smoothest moment. Pool anything that spawns in
+   bulk — here it's paper fragments, later it'll be bullets and enemies.
+   ------------------------------------------------------------------ */
+const particles = [];
+for (let i = 0; i < CONFIG.maxParticles; i++) {
+  particles.push({ alive: false, x: 0, y: 0, vx: 0, vy: 0, life: 0, max: 1, size: 2, color: "#fff" });
+}
+function spawnParticles(x, y, count, color, speed) {
+  for (let i = 0, spawned = 0; i < particles.length && spawned < count; i++) {
+    const p = particles[i];
+    if (p.alive) continue;
+    const a = rand() * TAU, s = speed * (0.35 + rand() * 0.9);
+    p.alive = true;
+    p.x = x; p.y = y;
+    p.vx = Math.cos(a) * s;
+    p.vy = Math.sin(a) * s - 40;
+    p.max = p.life = 0.35 + rand() * 0.5;
+    p.size = 1.5 + rand() * 3;
+    p.color = color;
+    spawned++;
+  }
+}
+
+/* ---------- Simulation ----------------------------------------------
+   One state machine, advanced only in fixed 1/60s steps.
+   TITLE -> HOLD -> FIRE -> BANNER -> (HOLD | OVER)
+   ------------------------------------------------------------------ */
+const sim = {
+  state: "TITLE",
+  round: 0,
+  youScore: 0,
+  oppScore: 0,
+  results: [],          // "won" | "lost" per round, drives the pips
+
+  t: 0,                 // seconds in the current state
+  holdFor: 0,
+  oppReact: 0,
+  turn: 0,              // 0 = edge-on (unshootable), 1 = fully face-on
+  greenAt: 0,           // real clock, for measuring player reaction
+
+  holes: [],            // bullet holes in target-local coords
+  flash: 0,
+  shakeMag: 0, shakeX: 0, shakeY: 0,
+  slowMoLeft: 0,
+  lampFlicker: 0
+};
+
+function setStatus(main, sub) {
+  document.getElementById("status").textContent = main;
+  document.getElementById("sub").textContent = sub ?? "";
+}
+function setLamp(cls) { document.getElementById("lamp").className = cls || ""; }
+
+function beginMatch() {
+  rand = mulberry32(CONFIG.seed + Date.now() % 100000);
+  sim.round = 0; sim.youScore = 0; sim.oppScore = 0; sim.results = [];
+  syncScoreboard();
+  document.getElementById("overlay").hidden = true;
+  beginRound();
+}
+
+function beginRound() {
+  sim.round++;
+  sim.state = "HOLD";
+  sim.t = 0;
+  sim.turn = 0;
+  sim.holes.length = 0;
+  sim.holdFor = randRange(CONFIG.holdMs[0], CONFIG.holdMs[1]) / 1000;
+
+  const base = CONFIG.opponentReactMs[Math.min(sim.round - 1, CONFIG.opponentReactMs.length - 1)];
+  sim.oppReact = (base + randRange(-CONFIG.opponentJitterMs, CONFIG.opponentJitterMs)) / 1000;
+
+  setLamp("hold");
+  setStatus("Hold", `Round ${sim.round} of ${CONFIG.rounds}`);
+  Sound.ready();
+}
+
+function goGreen() {
+  sim.state = "FIRE";
+  sim.t = 0;
+  sim.greenAt = performance.now();
+  setLamp("clear");
+  setStatus("Fire", "");
+  Sound.go();
+}
+
+function showBanner(good, verdict, detail) {
+  const b = document.getElementById("banner");
+  document.getElementById("verdict").textContent = verdict;
+  document.getElementById("detail").textContent = detail || "";
+  b.className = "show " + (good ? "good" : "bad");
+}
+function hideBanner() { document.getElementById("banner").className = ""; }
+
+function syncScoreboard() {
+  document.getElementById("youScore").textContent = sim.youScore;
+  document.getElementById("oppScore").textContent = sim.oppScore;
+  const pips = document.getElementById("pips").children;
+  for (let i = 0; i < pips.length; i++) pips[i].className = sim.results[i] || "";
+}
+
+function kick(mag) { sim.shakeMag = reducedMotion ? mag * 0.25 : mag; }
+
+// The player got a shot off in time.
+function resolvePlayerShot(x, y) {
+  const reactMs = Math.round(performance.now() - sim.greenAt);
+  const zone = zoneAt(x, y);
+  sim.state = "BANNER";
+  sim.t = 0;
+  sim.flash = 1;
+  setLamp("");
+  Sound.shot(-0.15);
+
+  if (zone === "miss") {
+    sim.results.push("lost");
+    sim.oppScore += CONFIG.opponentPoints;
+    spawnParticles(x, y, 8, "#4b5a5c", 130);
+    kick(CONFIG.shake.miss);
+    Sound.miss();
+    setTimeout(() => { Sound.shot(0.6); flashOpponent(); }, 180);
+    showBanner(false, "Missed", `${reactMs} ms · Lane 8 takes the round`);
+    setStatus("Missed", "");
+  } else {
+    const pts = CONFIG.points[zone];
+    sim.youScore += pts;
+    sim.results.push("won");
+    sim.holes.push({ lx: (x - CONFIG.target.x) / Math.max(sim.turn, 0.25), ly: y - CONFIG.target.y });
+    if (sim.holes.length > CONFIG.maxHoles) sim.holes.shift();
+
+    if (zone === "head") {
+      spawnParticles(x, y, 20, "#d8c9a8", 190);
+      kick(CONFIG.shake.head);
+      sim.slowMoLeft = reducedMotion ? 0 : CONFIG.slowMo.ms / 1000;
+      Sound.hitHead();
+      showBanner(true, `Head · +${pts}`, `${reactMs} ms`);
+    } else {
+      spawnParticles(x, y, 12, "#d8c9a8", 150);
+      kick(CONFIG.shake.body);
+      Sound.hitBody();
+      showBanner(true, `Body · +${pts}`, `${reactMs} ms`);
+    }
+    setStatus(zone === "head" ? "Head" : "Body", `${reactMs} ms`);
+
+    if (save.bestReactMs === null || reactMs < save.bestReactMs) {
+      save.bestReactMs = reactMs;
+      persist();
+    }
+  }
+  syncScoreboard();
+}
+
+function flashOpponent() {
+  const el = document.getElementById("oppSide");
+  el.classList.add("fired");
+  setTimeout(() => el.classList.remove("fired"), 220);
+}
+
+// The opponent's reaction time elapsed first.
+function resolveOpponentShot() {
+  sim.state = "BANNER";
+  sim.t = 0;
+  sim.oppScore += CONFIG.opponentPoints;
+  sim.results.push("lost");
+  setLamp("");
+  Sound.shot(0.6);
+  flashOpponent();
+  kick(CONFIG.shake.miss);
+  showBanner(false, "Too slow", `Lane 8 fired in ${Math.round(sim.oppReact * 1000)} ms`);
+  setStatus("Too slow", "");
+  syncScoreboard();
+}
+
+function falseStart() {
+  sim.state = "BANNER";
+  sim.t = 0;
+  sim.oppScore += CONFIG.opponentPoints;
+  sim.results.push("lost");
+  setLamp("");
+  Sound.buzz();
+  kick(CONFIG.shake.miss);
+  showBanner(false, "Fired early", "The light was still red");
+  setStatus("Fired early", "");
+  syncScoreboard();
+}
+
+function endMatch() {
+  sim.state = "OVER";
+  const won = sim.youScore > sim.oppScore;
+  const tied = sim.youScore === sim.oppScore;
+  save.matchesPlayed++;
+  if (won) save.matchesWon++;
+  persist();
+
+  document.getElementById("title").textContent = tied ? "Even" : (won ? "You win" : "Lane 8 wins");
+  document.getElementById("blurb").textContent = `${sim.youScore} to ${sim.oppScore}.` +
+    (save.bestReactMs !== null ? ` Your fastest shot so far is ${save.bestReactMs} ms.` : "");
+  document.querySelector("#overlay .rules").innerHTML =
+    "Head 5 &middot; Body 3 &middot; Miss 0<br>Lane 8 takes the body every time for 3.";
+  document.getElementById("cue").textContent = "Tap anywhere to shoot again";
+  document.getElementById("overlay").hidden = false;
+  setLamp("");
+  setStatus("Range cold", "");
+  won ? Sound.win() : Sound.lose();
+}
+
+function step(dt) {
+  // Turn animation and decay run in every state.
+  const turnTarget = (sim.state === "FIRE" || sim.state === "BANNER") ? 1 : 0;
+  const turnRate = 1000 / CONFIG.turnMs;
+  sim.turn += Math.sign(turnTarget - sim.turn) * Math.min(Math.abs(turnTarget - sim.turn), turnRate * dt);
+
+  sim.flash = Math.max(0, sim.flash - dt * 14);
+  sim.shakeMag = Math.max(0, sim.shakeMag - sim.shakeMag * CONFIG.shake.decay * dt);
+  sim.shakeX = (rand() - 0.5) * 2 * sim.shakeMag;
+  sim.shakeY = (rand() - 0.5) * 2 * sim.shakeMag;
+  sim.lampFlicker = 0.92 + Math.sin(performance.now() * 0.011) * 0.03 + rand() * 0.05;
+
+  for (const p of particles) {
+    if (!p.alive) continue;
+    p.life -= dt;
+    if (p.life <= 0) { p.alive = false; continue; }
+    p.vy += 720 * dt;               // gravity, design units per second squared
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+  }
+
+  sim.t += dt;
+
+  switch (sim.state) {
+    case "HOLD":
+      if (sim.t >= sim.holdFor) goGreen();
+      break;
+    case "FIRE":
+      if (sim.t >= sim.oppReact) resolveOpponentShot();
+      break;
+    case "BANNER":
+      if (sim.t >= CONFIG.bannerMs / 1000) {
+        hideBanner();
+        if (sim.round >= CONFIG.rounds) endMatch();
+        else beginRound();
+      }
+      break;
+  }
+}
+
+/* ---------- Input ----------------------------------------------------
+   Pointer events cover mouse, touch and stylus in one path. Everything
+   downstream sees a single action — fire(x, y) in design coordinates —
+   so adding a gamepad or a keyboard later means adding one listener
+   here and changing nothing else.
+   ------------------------------------------------------------------ */
+const canvas = document.getElementById("game");
+
+function toDesign(ev) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (ev.clientX - r.left) * (W / r.width), y: (ev.clientY - r.top) * (H / r.height) };
+}
+
+function fire(x, y) {
+  switch (sim.state) {
+    case "TITLE": beginMatch(); break;
+    case "OVER":  beginMatch(); break;
+    case "HOLD":  falseStart(); break;
+    case "FIRE":  resolvePlayerShot(x, y); break;
+    // BANNER swallows input on purpose, so a panicked double-tap can't
+    // roll straight into a false start on the next round.
+  }
+}
+
+document.getElementById("stage").addEventListener("pointerdown", (ev) => {
+  ev.preventDefault();
+  Sound.unlock();
+  const p = toDesign(ev);
+  fire(p.x, p.y);
+}, { passive: false });
+
+document.addEventListener("keydown", (ev) => {
+  if (ev.code !== "Space") return;
+  ev.preventDefault();
+  Sound.unlock();
+  // Keyboard has no aim point, so it always takes the safe body shot.
+  fire(CONFIG.target.x, CONFIG.target.y + 40);
+});
+
+/* ---------- Render ---------------------------------------------------
+   Reads sim, writes pixels, changes nothing. `alpha` is how far we are
+   between the last fixed step and the next — used to smooth motion so
+   the picture doesn't stutter on displays that aren't exactly 60Hz.
+   ------------------------------------------------------------------ */
+const ctx = canvas.getContext("2d");
+const view = { scale: 1 };
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.max(1, Math.round(r.width * dpr));
+  canvas.height = Math.max(1, Math.round(r.height * dpr));
+  view.scale = canvas.width / W;
+}
+window.addEventListener("resize", resize);
+
+function drawLane() {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#1e282a");
+  g.addColorStop(0.55, "#161f21");
+  g.addColorStop(1, "#0f1516");
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, W, H);
+
+  // Lane dividers converging downrange — cheap perspective, and it puts
+  // the target where the eye already wants to go.
+  ctx.strokeStyle = "rgba(120,150,148,.07)";
+  ctx.lineWidth = 2;
+  for (const side of [-1, 1]) {
+    ctx.beginPath();
+    ctx.moveTo(270 + side * 290, H);
+    ctx.lineTo(270 + side * 86, 470);
+    ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(0, 592); ctx.lineTo(W, 592);
+  ctx.strokeStyle = "rgba(120,150,148,.09)";
+  ctx.stroke();
+}
+
+function drawLampPool() {
+  const t = CONFIG.target;
+  const r = ctx.createRadialGradient(t.x, t.y - 40, 20, t.x, t.y - 40, 300);
+  const a = 0.20 * sim.lampFlicker;
+  r.addColorStop(0, `rgba(232,199,122,${a})`);
+  r.addColorStop(1, "rgba(232,199,122,0)");
+  ctx.fillStyle = r;
+  ctx.fillRect(0, 100, W, 700);
+}
+
+function drawTarget() {
+  const t = CONFIG.target;
+  if (sim.turn < 0.02) {
+    // Edge-on: just the hanger wire and a sliver of card.
+    ctx.strokeStyle = "rgba(200,215,212,.18)";
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(t.x, 120); ctx.lineTo(t.x, t.y - 150); ctx.stroke();
+    ctx.fillStyle = "#7d7461";
+    ctx.fillRect(t.x - 2, t.y - 150, 4, 290);
+    return;
+  }
+
+  ctx.save();
+  ctx.translate(t.x, t.y);
+  ctx.scale(sim.turn, 1);
+
+  // Manila backing card
+  ctx.fillStyle = "rgba(0,0,0,.35)";
+  ctx.fillRect(-124, -158, 248, 306);
+  ctx.fillStyle = "#d8c9a8";
+  ctx.fillRect(-120, -154, 240, 298);
+
+  // Silhouette
+  ctx.fillStyle = "#14100e";
+  ctx.fill(BODY_PATH);
+  ctx.beginPath();
+  ctx.arc(0, t.headY, t.headR, 0, TAU);
+  ctx.fill();
+
+  // Printed scoring zones. Diegetic UI — the player learns the rules
+  // from the object itself instead of from a tutorial screen.
+  ctx.strokeStyle = "rgba(216,201,168,.42)";
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([4, 4]);
+  ctx.beginPath();
+  ctx.arc(0, t.headY, t.headR - 5, 0, TAU);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.ellipse(0, 26, 52, 62, 0, 0, TAU);
+  ctx.stroke();
+  ctx.setLineDash([]);
+
+  ctx.fillStyle = "rgba(216,201,168,.5)";
+  ctx.font = "600 15px Barlow, sans-serif";
+  ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText("5", 0, t.headY + 1);
+  ctx.fillText("3", 0, 26);
+
+  // Bullet holes, drawn in the same local space they were recorded in.
+  for (const h of sim.holes) {
+    ctx.fillStyle = "#0a0908";
+    ctx.beginPath(); ctx.arc(h.lx, h.ly, 5, 0, TAU); ctx.fill();
+    ctx.strokeStyle = "rgba(216,201,168,.55)";
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(h.lx, h.ly, 6.5, 0, TAU); ctx.stroke();
+  }
+
+  ctx.restore();
+
+  ctx.strokeStyle = "rgba(200,215,212,.16)";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(t.x, 120); ctx.lineTo(t.x, t.y - 154); ctx.stroke();
+}
+
+function drawParticles() {
+  for (const p of particles) {
+    if (!p.alive) continue;
+    ctx.globalAlpha = Math.max(0, p.life / p.max);
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawFlash() {
+  if (sim.flash <= 0) return;
+  ctx.fillStyle = `rgba(255,240,205,${sim.flash * 0.5})`;
+  ctx.fillRect(0, 0, W, H);
+}
+
+function render() {
+  // Cheap guard: fonts loading, rotation, and iOS URL-bar collapse all
+  // resize the stage without always firing a usable resize event.
+  const r = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  if (Math.abs(canvas.width - r.width * dpr) > 1) resize();
+
+  ctx.setTransform(view.scale, 0, 0, view.scale, sim.shakeX * view.scale, sim.shakeY * view.scale);
+  ctx.clearRect(-40, -40, W + 80, H + 80);
+  drawLane();
+  drawLampPool();
+  drawTarget();
+  drawParticles();
+  drawFlash();
+}
+
+/* ---------- Loop -----------------------------------------------------
+   The single most important pattern in this file.
+
+   The simulation always advances in identical 1/60s steps, no matter how
+   fast or slow the display refreshes. Rendering happens whenever the
+   browser is ready. Tie your rules to frame time instead and the game
+   plays differently on a 120Hz iPhone than on a 60Hz one — bullets move
+   at different speeds, timings drift, and physics can explode on a
+   stutter. Every engine you touch after this will use this pattern.
+   ------------------------------------------------------------------ */
+const STEP = 1 / 60;
+let acc = 0, last = performance.now();
+
+function loop(now) {
+  let dt = (now - last) / 1000;
+  last = now;
+  dt = Math.min(dt, 0.25);         // clamp: after a tab switch, don't
+                                   // run hundreds of catch-up steps
+
+  // Slow motion scales simulated time only. Input timing and the frame
+  // loop stay on the real clock.
+  if (sim.slowMoLeft > 0) {
+    sim.slowMoLeft -= dt;
+    dt *= CONFIG.slowMo.scale;
+  }
+
+  acc += dt;
+  while (acc >= STEP) { step(STEP); acc -= STEP; }
+  render();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- Boot ---------------------------------------------------- */
+(async function boot() {
+  await loadSave();
+  resize();
+  if (save.bestReactMs !== null) setStatus("Tap to begin", `Fastest shot ${save.bestReactMs} ms`);
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>

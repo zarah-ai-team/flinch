@@ -1,0 +1,52 @@
+name: Deploy Flinch to GitHub Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "lane7/**"
+      - ".github/workflows/deploy-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      # The rules tests gate every deploy. They need no browser.
+      - run: node lane7/test/sim.test.js
+
+  deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # Ship only what the game needs: the shell, the sources, the
+      # self-hosted fonts, the icons and the PWA files. Never the tests.
+      - run: |
+          mkdir -p dist
+          cp lane7/index.html lane7/manifest.webmanifest lane7/sw.js dist/
+          cp -r lane7/src dist/src
+          cp -r lane7/fonts dist/fonts
+          cp -r lane7/icons dist/icons
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deployment
+        uses: actions/deploy-pages@v4
